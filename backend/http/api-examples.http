@@ -1,0 +1,165 @@
+### Variables de entorno del cliente HTTP (IntelliJ / VS Code REST Client)
+@baseUrl = http://localhost:8080
+@clientId = cliente-demo
+@operatorId = operador-1
+@technicianId = tecnico-1
+
+### 1. Ver configuracion del motor
+GET {{baseUrl}}/api/v1/grouping/config
+
+### 2. Registrar primer reporte (C1: crea incidencia nueva)
+# @name primerReporte
+POST {{baseUrl}}/api/v1/reports
+Content-Type: application/json
+X-Actor-Id: {{clientId}}
+X-Actor-Role: CLIENTE
+
+{
+  "clientId": "{{clientId}}",
+  "sector": "San Isidro",
+  "reference": "Av. Arequipa 1234",
+  "failureType": "CORTE_TOTAL",
+  "description": "No hay luz en toda la cuadra desde hace 20 minutos"
+}
+
+### 3. Registrar segundo reporte del mismo sector (debe agruparse)
+POST {{baseUrl}}/api/v1/reports
+Content-Type: application/json
+X-Actor-Id: {{clientId}}
+X-Actor-Role: CLIENTE
+
+{
+  "clientId": "{{clientId}}",
+  "sector": "san isidro",
+  "failureType": "CORTE_TOTAL",
+  "description": "Seguimos sin energia electrica en la vivienda"
+}
+
+### 4. Caso C2: mismo sector y tiempo, distinto tipo (Baja Certeza)
+POST {{baseUrl}}/api/v1/reports
+Content-Type: application/json
+X-Actor-Id: {{clientId}}
+X-Actor-Role: CLIENTE
+
+{
+  "sector": "San Isidro",
+  "failureType": "BAJA_TENSION",
+  "description": "La tension baja y los focos parpadean"
+}
+
+### 5. Caso C5: ubicacion incompleta
+POST {{baseUrl}}/api/v1/reports
+Content-Type: application/json
+X-Actor-Id: {{clientId}}
+X-Actor-Role: CLIENTE
+
+{
+  "failureType": "CORTE_TOTAL",
+  "description": "No tengo luz y no se cual es mi sector"
+}
+
+### 6. Bandeja del operador (priorizada)
+GET {{baseUrl}}/api/v1/operator/incidents?onlyOpen=true&page=0&size=20
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+### 7. Bandeja filtrada por baja certeza
+GET {{baseUrl}}/api/v1/operator/incidents?requiresReview=true
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+### 8. Detalle de la incidencia creada en el paso 2
+# Reemplazar {{incidentId}} con el valor devuelto por el paso 2
+@incidentId = 00000000-0000-0000-0000-000000000000
+GET {{baseUrl}}/api/v1/operator/incidents/{{incidentId}}
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+### 9. Confirmar agrupacion (T1)
+POST {{baseUrl}}/api/v1/operator/incidents/{{incidentId}}/confirm
+Content-Type: application/json
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+{
+  "note": "Agrupacion verificada con el cliente"
+}
+
+### 10. Iniciar atencion (tecnico)
+POST {{baseUrl}}/api/v1/technician/incidents/{{incidentId}}/status
+Content-Type: application/json
+X-Actor-Id: {{technicianId}}
+X-Actor-Role: TECNICO
+
+{
+  "status": "EN_ATENCION",
+  "note": "Cuadrilla en camino"
+}
+
+### 11. Marcar servicio restablecido (tecnico)
+POST {{baseUrl}}/api/v1/technician/incidents/{{incidentId}}/status
+Content-Type: application/json
+X-Actor-Id: {{technicianId}}
+X-Actor-Role: TECNICO
+
+{
+  "status": "RESUELTA",
+  "note": "Suministro restablecido"
+}
+
+### 12. Contexto consolidado del tecnico
+GET {{baseUrl}}/api/v1/technician/incidents/{{incidentId}}
+X-Actor-Id: {{technicianId}}
+X-Actor-Role: TECNICO
+
+### 13. Caso C7: el cliente indica que la falla persiste
+# Reemplazar {{reportId}} por el UUID devuelto en el paso 2
+@reportId = 00000000-0000-0000-0000-000000000000
+POST {{baseUrl}}/api/v1/reports/{{reportId}}/persistence
+Content-Type: application/json
+
+{
+  "note": "La luz sigue sin volver"
+}
+
+### 14. Separar un reporte (T2)
+POST {{baseUrl}}/api/v1/operator/reports/{{reportId}}/separate
+Content-Type: application/json
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+{
+  "createNewIncident": true,
+  "note": "Corresponde a otra falla"
+}
+
+### 15. Reasignar un reporte (T3)
+POST {{baseUrl}}/api/v1/operator/reports/{{reportId}}/reassign
+Content-Type: application/json
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+{
+  "targetIncidentId": "{{incidentId}}",
+  "note": "Reintegrado al caso confirmado"
+}
+
+### 16. Preview del motor sin persistir (H3)
+POST {{baseUrl}}/api/v1/grouping/preview
+Content-Type: application/json
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+{
+  "sector": "San Isidro",
+  "failureType": "CORTE_TOTAL",
+  "description": "Sigue sin luz en la cuadra"
+}
+
+### 17. Bandeja individual (alternativa A para H4)
+GET {{baseUrl}}/api/v1/operator/reports?page=0&size=20
+X-Actor-Id: {{operatorId}}
+X-Actor-Role: OPERADOR
+
+### 18. Seguimiento del cliente
+GET {{baseUrl}}/api/v1/reports/{{reportId}}

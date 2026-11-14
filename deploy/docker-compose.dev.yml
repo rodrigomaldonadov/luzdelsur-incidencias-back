@@ -1,0 +1,12 @@
+# Override solo para demo local, sin el microservicio real de Persona 5.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  embeddings:
+    build:
+      context: ./mock-embeddings
+    image: luzdelsur/embeddings-mock:dev
+
+  backend:
+    environment:
+      SPRINGDOC_ENABLED: "true"
+      APP_LOG_LEVEL: INFO

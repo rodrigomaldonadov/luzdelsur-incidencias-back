@@ -86,7 +86,7 @@ app:
     # false: el registro publico solo crea cuentas CLIENTE.
     allow-staff-registration: ${APP_AUTH_ALLOW_STAFF_REGISTRATION:false}
   demo:
-    # Cuentas de demostracion (operador, tecnicos y cliente) y dataset C1-C7.
+    # Cuentas de demostracion (operador, tecnicos y cliente) y dataset C1-C5.
     seed-users: ${APP_DEMO_SEED_USERS:true}
     seed-reports: ${APP_DEMO_SEED_REPORTS:true}
     password: ${APP_DEMO_PASSWORD:12345678}

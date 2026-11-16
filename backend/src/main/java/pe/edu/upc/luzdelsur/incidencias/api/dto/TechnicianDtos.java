@@ -1,5 +1,6 @@
 package pe.edu.upc.luzdelsur.incidencias.api.dto;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -15,6 +16,27 @@ public final class TechnicianDtos {
     private TechnicianDtos() {
     }
 
+    /**
+     * Fila de la bandeja del tecnico: casos confirmados, en atencion o
+     * reabiertos. No incluye casos sugeridos ni descartados.
+     */
+    public record TechnicianIncidentSummary(
+            UUID id,
+            String sector,
+            FailureType failureType,
+            IncidentStatus status,
+            Certainty certainty,
+            boolean requiresReview,
+            PriorityLabel priorityLabel,
+            double priorityScore,
+            int affectedReports,
+            Instant firstReportedAt,
+            Instant lastReportedAt,
+            String assignedTechnicianId,
+            Instant assignedAt,
+            String estimatedScope) {
+    }
+
     public record TechnicianReportView(
             UUID id,
             String sector,
@@ -23,7 +45,9 @@ public final class TechnicianDtos {
             String description,
             Instant reportedAt,
             ReportLinkStatus linkStatus,
-            Certainty certainty) {
+            Certainty certainty,
+            BigDecimal latitude,
+            BigDecimal longitude) {
     }
 
     public record TechnicianIncidentView(
@@ -38,6 +62,14 @@ public final class TechnicianDtos {
             int affectedReports,
             Instant firstReportedAt,
             Instant lastReportedAt,
+            Instant confirmedAt,
+            String confirmedBy,
+            Instant statusUpdatedAt,
+            String statusUpdatedBy,
+            String assignedTechnicianId,
+            Instant assignedAt,
+            Instant closedAt,
+            Instant updatedAt,
             String estimatedScope,
             List<TechnicianReportView> reports,
             List<String> warnings) {

@@ -23,7 +23,7 @@ DB_USER=incidencias
 DB_PASSWORD=incidencias
 ```
 
-Flyway aplica `src/main/resources/db/migration/V1__baseline.sql` al iniciar. `spring.jpa.hibernate.ddl-auto=validate` impide que Hibernate modifique el esquema.
+Flyway aplica `src/main/resources/db/migration/V1__baseline.sql` y `V2__technician_assignment.sql` al iniciar. `spring.jpa.hibernate.ddl-auto=validate` impide que Hibernate modifique el esquema.
 
 ---
 
@@ -54,11 +54,11 @@ Regla de dependencias: `api → servicios → repositorios`; `grouping` no conoc
 | Prueba | Qué valida |
 | --- | --- |
 | `GroupingEngineTest` | C1, C2, C3/C4, C5, degradación por embeddings |
-| `ReportFlowIntegrationTest` | Flujo completo, autorización por rol, separación, reasignación y C7 |
+| `ReportFlowIntegrationTest` | Flujo completo, autorización por rol, separación, reasignación, C7, reportes propios y bandeja/asignación del técnico |
 | `HttpDescriptionSimilarityClientTest` | Contrato HTTP, filtrado de valores y enfriamiento ante fallos |
-| `SchemaValidationTest` | Flyway + mapeo JPA (`ddl-auto=validate`) |
+| `SchemaValidationTest` | Flyway `V1`+`V2` + mapeo JPA (`ddl-auto=validate`) |
 
-Resultado esperado: **19 pruebas, 0 fallos**.
+Resultado esperado: **21 pruebas, 0 fallos**.
 
 ---
 
@@ -86,9 +86,9 @@ Todo se controla por variables de entorno (ver [`../deploy/.env.example`](../dep
 
 Ver [`../docs/api.md`](../docs/api.md). Resumen:
 
-- Cliente: `POST /api/v1/reports`, `GET /api/v1/reports/{id}`, `POST /api/v1/reports/{id}/persistence`
+- Cliente: `POST /api/v1/reports`, `GET /api/v1/reports/{id}`, `GET /api/v1/reports/mine`, `POST /api/v1/reports/{id}/persistence`
 - Operador: bandeja, detalle, confirmar, cambiar estado, separar, reasignar
-- Técnico: contexto del caso y cambio a `EN_ATENCION`/`RESUELTA`
+- Técnico: bandeja (`onlyMine`), contexto del caso y cambio a `EN_ATENCION`/`RESUELTA`
 - Motor: `POST /api/v1/grouping/preview`, `GET /api/v1/grouping/config`
 
 ---

@@ -80,6 +80,12 @@ public class Incident {
     @Column(name = "closed_at")
     private Instant closedAt;
 
+    @Column(name = "assigned_technician_id", length = 64)
+    private String assignedTechnicianId;
+
+    @Column(name = "assigned_at")
+    private Instant assignedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -164,6 +170,16 @@ public class Incident {
         }
     }
 
+    /**
+     * El tecnico que inicia la atencion queda asociado al caso. No es una
+     * asignacion automatica de flota: es la constancia de quien tomo el trabajo.
+     */
+    public void assignTechnician(String technicianId, Instant now) {
+        this.assignedTechnicianId = technicianId;
+        this.assignedAt = now;
+        this.updatedAt = now;
+    }
+
     private void refreshReviewFlag() {
         this.requiresReview = certainty == Certainty.BAJA && status.isOpen();
     }
@@ -234,6 +250,14 @@ public class Incident {
 
     public Instant getClosedAt() {
         return closedAt;
+    }
+
+    public String getAssignedTechnicianId() {
+        return assignedTechnicianId;
+    }
+
+    public Instant getAssignedAt() {
+        return assignedAt;
     }
 
     public Instant getCreatedAt() {

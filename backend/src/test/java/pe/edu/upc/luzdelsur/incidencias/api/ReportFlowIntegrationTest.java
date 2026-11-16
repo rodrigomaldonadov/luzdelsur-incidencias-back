@@ -225,8 +225,114 @@ class ReportFlowIntegrationTest {
                 .andExpect(jsonPath("$.status").value("UP"));
     }
 
+    @Test
+    @DisplayName("El cliente solo lista sus propios reportes y requiere identificacion")
+    void clientListsOnlyOwnReports() throws Exception {
+        Instant base = Instant.now().minusSeconds(300);
+        JsonNode own = createReport("Pueblo Libre", FailureType.CORTE_TOTAL,
+                "Sin luz en mi casa", base, "cliente-uno", null, null);
+        JsonNode foreign = createReport("Pueblo Libre", FailureType.CORTE_TOTAL,
+                "Sin luz en la casa de al lado", base.plusSeconds(30), "cliente-dos", null, null);
+
+        String ownId = own.path("report").path("id").asText();
+        String foreignId = foreign.path("report").path("id").asText();
+
+        String body = mvc.perform(get("/api/v1/reports/mine")
+                        .header("X-Actor-Id", "cliente-uno")
+                        .header("X-Actor-Role", "CLIENTE"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        JsonNode content = objectMapper.readTree(body).path("content");
+        assertThat(content.findValuesAsText("id")).contains(ownId).doesNotContain(foreignId);
+
+        mvc.perform(get("/api/v1/reports/mine"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    @DisplayName("Bandeja del tecnico: lista casos confirmados, asigna al iniciar atencion y amplia el detalle")
+    void technicianQueueAssignmentAndDetail() throws Exception {
+        Instant base = Instant.now().minusSeconds(300);
+        JsonNode first = createReport("Lince", FailureType.CORTE_TOTAL,
+                "Corte total en la cuadra", base, "cliente-lince", -12.0850, -77.0350);
+        createReport("Lince", FailureType.CORTE_TOTAL,
+                "Seguimos sin energia", base.plusSeconds(60), "cliente-lince", -12.0860, -77.0340);
+
+        String incidentId = first.path("incidentId").asText();
+
+        mvc.perform(asOperator(post("/api/v1/operator/incidents/{id}/confirm", incidentId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"note\":\"Caso verificado\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incident.status").value("CONFIRMADA"));
+
+        mvc.perform(get("/api/v1/technician/incidents")
+                        .header("X-Actor-Id", "tec-lince")
+                        .header("X-Actor-Role", "TECNICO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.id == '" + incidentId + "')]").exists());
+
+        mvc.perform(get("/api/v1/technician/incidents")
+                        .param("onlyMine", "true")
+                        .header("X-Actor-Id", "tec-lince")
+                        .header("X-Actor-Role", "TECNICO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        mvc.perform(post("/api/v1/technician/incidents/{id}/status", incidentId)
+                        .header("X-Actor-Id", "tec-lince")
+                        .header("X-Actor-Role", "TECNICO")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"EN_ATENCION\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.incident.status").value("EN_ATENCION"))
+                .andExpect(jsonPath("$.incident.assignedTechnicianId").value("tec-lince"));
+
+        mvc.perform(get("/api/v1/technician/incidents")
+                        .param("onlyMine", "true")
+                        .header("X-Actor-Id", "tec-lince")
+                        .header("X-Actor-Role", "TECNICO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(incidentId))
+                .andExpect(jsonPath("$.content[0].assignedTechnicianId").value("tec-lince"));
+
+        mvc.perform(get("/api/v1/technician/incidents")
+                        .param("onlyMine", "true")
+                        .header("X-Actor-Id", "tec-otro")
+                        .header("X-Actor-Role", "TECNICO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        mvc.perform(get("/api/v1/technician/incidents/{id}", incidentId)
+                        .header("X-Actor-Id", "tec-lince")
+                        .header("X-Actor-Role", "TECNICO"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assignedTechnicianId").value("tec-lince"))
+                .andExpect(jsonPath("$.assignedAt").isNotEmpty())
+                .andExpect(jsonPath("$.confirmedAt").isNotEmpty())
+                .andExpect(jsonPath("$.statusUpdatedBy").value("tec-lince"))
+                .andExpect(jsonPath("$.reports[0].latitude").isNumber())
+                .andExpect(jsonPath("$.reports[0].longitude").isNumber());
+
+        mvc.perform(get("/api/v1/technician/incidents")
+                        .param("status", "SUGERIDA")
+                        .header("X-Actor-Id", "tec-lince")
+                        .header("X-Actor-Role", "TECNICO"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+    }
+
     private JsonNode createReport(String sector, FailureType failureType,
                                   String description, Instant reportedAt) throws Exception {
+        return createReport(sector, failureType, description, reportedAt, "cliente-demo", null, null);
+    }
+
+    private JsonNode createReport(String sector, FailureType failureType, String description,
+                                  Instant reportedAt, String actorId,
+                                  Double latitude, Double longitude) throws Exception {
         ObjectNode body = objectMapper.createObjectNode();
         if (sector != null) {
             body.put("sector", sector);
@@ -236,10 +342,16 @@ class ReportFlowIntegrationTest {
         if (reportedAt != null) {
             body.put("reportedAt", reportedAt.toString());
         }
+        if (latitude != null) {
+            body.put("latitude", latitude);
+        }
+        if (longitude != null) {
+            body.put("longitude", longitude);
+        }
 
         String response = mvc.perform(post("/api/v1/reports")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .header("X-Actor-Id", "cliente-demo")
+                        .header("X-Actor-Id", actorId)
                         .header("X-Actor-Role", "CLIENTE")
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isCreated())

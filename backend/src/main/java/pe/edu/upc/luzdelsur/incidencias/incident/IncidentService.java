@@ -1,7 +1,9 @@
 package pe.edu.upc.luzdelsur.incidencias.incident;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -14,7 +16,9 @@ import pe.edu.upc.luzdelsur.incidencias.api.ApiMapper;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.OperatorDtos;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.ReportDtos;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.TechnicianDtos;
+import pe.edu.upc.luzdelsur.incidencias.common.BadRequestException;
 import pe.edu.upc.luzdelsur.incidencias.common.ConflictException;
+import pe.edu.upc.luzdelsur.incidencias.common.ForbiddenException;
 import pe.edu.upc.luzdelsur.incidencias.common.NotFoundException;
 import pe.edu.upc.luzdelsur.incidencias.common.PageResponse;
 import pe.edu.upc.luzdelsur.incidencias.report.FailureType;
@@ -26,6 +30,7 @@ import pe.edu.upc.luzdelsur.incidencias.report.ReportLinkStatus;
 import pe.edu.upc.luzdelsur.incidencias.report.ReportRepository;
 import pe.edu.upc.luzdelsur.incidencias.report.ReportSpecifications;
 import pe.edu.upc.luzdelsur.incidencias.security.Actor;
+import pe.edu.upc.luzdelsur.incidencias.security.ActorRole;
 
 /**
  * Ciclo de vida de la incidencia: confirmacion, estados, separacion,
@@ -36,6 +41,11 @@ import pe.edu.upc.luzdelsur.incidencias.security.Actor;
 public class IncidentService {
 
     private static final int MAX_NOTE_LENGTH = 500;
+
+    private static final Set<IncidentStatus> TECHNICIAN_VISIBLE_STATUSES = EnumSet.of(
+            IncidentStatus.CONFIRMADA,
+            IncidentStatus.EN_ATENCION,
+            IncidentStatus.REABIERTA);
 
     private final IncidentRepository incidents;
     private final ReportRepository reports;
@@ -135,6 +145,9 @@ public class IncidentService {
         }
 
         incident.changeStatus(target, actor.id(), now);
+        if (target == IncidentStatus.EN_ATENCION && actor.role() == ActorRole.TECNICO) {
+            incident.assignTechnician(actor.id(), now);
+        }
         metrics.refresh(incident);
         incidents.save(incident);
         return buildDetail(incident);
@@ -288,6 +301,38 @@ public class IncidentService {
         }
         List<Report> linked = reports.findByIncidentIdOrderByReportedAtAsc(incidentId);
         return mapper.technicianView(incident, linked);
+    }
+
+    /**
+     * Bandeja del tecnico: solo casos confirmados, en atencion o reabiertos.
+     * Si {@code onlyMine} es verdadero, filtra por el tecnico autenticado.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<TechnicianDtos.TechnicianIncidentSummary> searchTechnicianIncidents(
+            IncidentStatus status, String sector, boolean onlyMine,
+            String technicianId, Pageable pageable) {
+
+        if (status != null && !TECHNICIAN_VISIBLE_STATUSES.contains(status)) {
+            throw new BadRequestException(
+                    "El tecnico solo puede consultar casos en estado CONFIRMADA, EN_ATENCION o REABIERTA");
+        }
+        if (onlyMine && (technicianId == null || technicianId.isBlank()
+                || Actor.ANONYMOUS_ID.equals(technicianId))) {
+            throw new ForbiddenException(
+                    "Para filtrar solo sus casos debe identificarse con X-Actor-Id (o JWT)");
+        }
+
+        Specification<Incident> spec = (root, query, cb) -> cb.conjunction();
+        spec = status != null
+                ? and(spec, IncidentSpecifications.hasStatus(status))
+                : and(spec, IncidentSpecifications.hasStatusIn(TECHNICIAN_VISIBLE_STATUSES));
+        spec = and(spec, IncidentSpecifications.sectorContains(sector));
+        if (onlyMine) {
+            spec = spec.and(IncidentSpecifications.assignedTo(technicianId));
+        }
+
+        Page<Incident> page = incidents.findAll(spec, pageable);
+        return PageResponse.from(page, mapper::technicianSummary);
     }
 
     @Transactional(readOnly = true)

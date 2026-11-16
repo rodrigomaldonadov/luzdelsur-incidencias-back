@@ -32,6 +32,8 @@ public final class OperatorDtos {
             Instant lastReportedAt,
             Instant confirmedAt,
             String confirmedBy,
+            String assignedTechnicianId,
+            Instant assignedAt,
             Instant closedAt,
             Instant updatedAt,
             long version) {

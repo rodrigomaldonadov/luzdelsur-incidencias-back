@@ -14,7 +14,7 @@ El backend es la capa que convierte reportes individuales de clientes en **propu
 | --- | --- |
 | API REST en Spring Boot con motor heurístico | Autenticación JWT, roles y auditoría completa (Persona 3) |
 | Llamada HTTP tolerante a fallos al microservicio de embeddings | Modelo real de embeddings (Persona 5) |
-| Modelo operativo PostgreSQL + migración base `V1` | Migraciones `V2+` de usuarios y auditoría (Persona 3) |
+| Modelo operativo PostgreSQL + migración base `V1` y `V2` | Migraciones `V3+` de usuarios y auditoría (Persona 3) |
 | Dockerización, `docker-compose`, Nginx con HTTPS y variables de entorno | Vistas React (Personas 2 y 4) |
 | Pruebas del motor y del flujo principal | Pruebas funcionales de las tres vistas y video (Persona 4) |
 
@@ -271,6 +271,8 @@ erDiagram
         timestamptz confirmed_at
         varchar confirmed_by
         timestamptz closed_at
+        varchar assigned_technician_id
+        timestamptz assigned_at
         timestamptz created_at
         timestamptz updated_at
         bigint version
@@ -317,9 +319,10 @@ erDiagram
 | `sector_key` normalizado | Evita falsos negativos por tildes/mayúsculas; se conserva `sector` para mostrar |
 | `report_link_history` | Trazabilidad de confirmar, separar y reasignar sin depender de logs |
 | `version` (`@Version`) | Evita que dos operadores sobrescriban el mismo caso (bloqueo optimista) |
+| `assigned_technician_id` | Permite filtrar la bandeja del técnico por responsable real, sin inventar un modelo de flota |
 | `grouping_reason` y `similarity_score` | El operador ve **por qué** se propuso la agrupación |
 
-La migración base es `backend/src/main/resources/db/migration/V1__baseline.sql`. Persona 3 agrega `V2+` (usuarios, roles, auditoría) sin modificar `V1`.
+La migración base es `backend/src/main/resources/db/migration/V1__baseline.sql`. Persona 1 añade `V2__technician_assignment.sql` (asignación al iniciar atención); Persona 3 agrega `V3+` (usuarios, roles, auditoría) sin modificar `V1` ni `V2`.
 
 ---
 
@@ -345,7 +348,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | `SUGERIDA → CONFIRMADA` | Operador | Reportes pasan a `CONFIRMADO`; se registra actor y fecha |
 | `SUGERIDA/CONFIRMADA → DESCARTADA` | Operador | Se separan los reportes y se conserva el caso para auditoría |
-| `CONFIRMADA → EN_ATENCION → RESUELTA` | Técnico | Solo estas dos transiciones están permitidas al técnico |
+| `CONFIRMADA → EN_ATENCION → RESUELTA` | Técnico | Solo estas dos transiciones están permitidas al técnico; al iniciar atención se registra `assignedTechnicianId` |
 | `RESUELTA/CERRADA → REABIERTA` | Cliente (persistencia) | No se pierde historial; se registra el evento |
 | Cualquier salto inválido | — | HTTP `409` con mensaje explicativo |
 
@@ -398,7 +401,7 @@ Detalle paso a paso en [`despliegue.md`](despliegue.md).
 | **Disponibilidad del registro** | El motor funciona sin embeddings (degradación a `MEDIA`); *cooldown* ante fallos | No hay réplica de PostgreSQL en esta iteración |
 | **Rendimiento** | Consultas indexadas por `sector_key + status + last_reported_at`; máximo 5 candidatos; timeout de 1,5 s | Sin pruebas de carga formales |
 | **Consistencia** | Transacciones por caso; bloqueo optimista con `@Version` | Dos altas simultáneas podrían crear casos separados (ver §11) |
-| **Seguridad** | HTTPS, red interna, secretos en entorno, roles por cabecera y mínimo privilegio en endpoints | JWT y auditoría de accesos pendientes (Persona 3) |
+| **Seguridad** | HTTPS, red interna, secretos en entorno, roles por cabecera y mínimo privilegio en endpoints; los reportes se asocian al actor y `/reports/mine` solo devuelve los propios | JWT y auditoría de accesos pendientes (Persona 3) |
 | **Observabilidad** | Logs estructurados de Nginx, logs de aplicación, Actuator health/info | Métricas y trazas distribuidas fuera de alcance |
 | **Mantenibilidad** | Capas separadas, motor puro, configuración externalizada, pruebas automatizadas | — |
 | **Portabilidad** | Imágenes multi-stage, Compose reproducible | El servidor debe tener Docker y DNS configurado |

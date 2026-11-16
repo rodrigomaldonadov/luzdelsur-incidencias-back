@@ -10,12 +10,25 @@ Este documento define qué entrega Persona 1, qué debe completar cada rol y có
 | --- | --- | --- | --- | --- |
 | API REST | Implementada y documentada | Extiende estados/auditoría | — | Consume |
 | Motor heurístico | Implementado y probado | Aporta dataset C1–C7 | — | — |
-| PostgreSQL | Migración `V1` operativa | `V2+`: usuarios, roles, auditoría | — | — |
-| Seguridad | HTTPS, red interna, roles temporales | JWT real, mínimo privilegio, auditoría | — | Login/registro y manejo de sesión |
+| PostgreSQL | Migraciones `V1` y `V2` operativas | `V3+`: usuarios, roles, auditoría | — | — |
+| Seguridad | HTTPS, red interna, roles temporales y propiedad de reportes | JWT real, mínimo privilegio, auditoría | — | Login/registro y manejo de sesión |
 | Embeddings | Cliente HTTP tolerante a fallos + mock | — | Servicio FastAPI real | — |
 | Docker/despliegue | Compose, Dockerfile, Nginx, scripts | — | Dockerfile del microservicio | — |
 | Pruebas | Motor y flujo de integración | Pruebas de datos | Pruebas del servicio | Pruebas funcionales de vistas |
 | Documentación | Arquitectura y justificación | Datos y resultados del motor | READMEs e informe final | Flujo de demo, ética y escalabilidad |
+
+### 1.1 Completado en esta iteración (Persona 1)
+
+| Endpoint / cambio | Estado | Nota |
+| --- | --- | --- |
+| `GET /api/v1/reports/mine` | Implementado | Exige identidad; devuelve solo los reportes del actor |
+| `GET /api/v1/technician/incidents` | Implementado | Casos `CONFIRMADA`, `EN_ATENCION` o `REABIERTA`; filtro `onlyMine` |
+| `GET /api/v1/technician/incidents/{id}` ampliado | Implementado | Asignación, marcas de estado y coordenadas de los reportes |
+| Migración `V2__technician_assignment.sql` | Implementada | `assigned_technician_id` y `assigned_at` |
+| `POST /api/v1/auth/login` | **No** | Fuera del alcance de Persona 1 (Persona 3) |
+| `POST /api/v1/auth/register` | **No** | Fuera del alcance de Persona 1 (Persona 3) |
+| `GET /api/v1/auth/me` | **No** | Fuera del alcance de Persona 1 (Persona 3) |
+| `POST /api/v1/auth/refresh` (opcional) | **No** | Fuera del alcance de Persona 1 (Persona 3) |
 
 ---
 
@@ -23,13 +36,14 @@ Este documento define qué entrega Persona 1, qué debe completar cada rol y có
 
 ### 2.1 No modificar la migración aplicada
 
-`V1__baseline.sql` ya está desplegada. Agregar nuevas migraciones:
+`V1__baseline.sql` y `V2__technician_assignment.sql` ya están desplegadas. Agregar nuevas migraciones:
 
 ```text
 backend/src/main/resources/db/migration/
-├── V1__baseline.sql        (Persona 1, no editar)
-├── V2__users_and_roles.sql (Persona 3)
-└── V3__audit_events.sql    (Persona 3)
+├── V1__baseline.sql              (Persona 1, no editar)
+├── V2__technician_assignment.sql (Persona 1, no editar)
+├── V3__users_and_roles.sql       (Persona 3)
+└── V4__audit_events.sql          (Persona 3)
 ```
 
 ### 2.2 Autenticación JWT
@@ -45,9 +59,11 @@ public interface ActorProvider {
 `HeaderActorProvider` es temporal. Persona 3 debe:
 
 1. Agregar `spring-boot-starter-security` y el filtro JWT.
-2. Crear `JwtActorProvider implements ActorProvider` con `@Primary`, leyendo `sub` y `role` del token.
+2. Crear `JwtActorProvider implements ActorProvider` con `@Primary`, leyendo `sub` y `role` del token. El `sub` debe usarse como `Actor.id` porque de él depende la propiedad de `/api/v1/reports/mine`.
 3. Configurar `SecurityFilterChain`:
-   - `/api/v1/reports/**` → público (o `CLIENTE` autenticado, según decisión del equipo).
+   - `/api/v1/reports` (POST) → público o `CLIENTE`, según decisión del equipo.
+   - `/api/v1/reports/mine` → `CLIENTE` autenticado (nunca anónimo).
+   - `/api/v1/reports/{id}` → público en el prototipo; evaluar restricción por dueño en una iteración posterior.
    - `/api/v1/operator/**` → `hasRole('OPERADOR')`.
    - `/api/v1/technician/**` → `hasRole('TECNICO')`.
    - `/api/v1/grouping/preview` → `OPERADOR`.
@@ -71,7 +87,7 @@ El motor y los filtros ya están listos. Para cargar el dataset:
 
 - Preferir `POST /api/v1/reports` con `reportedAt` explícito (permite C3 sin esperar).
 - Para pruebas sin persistir, usar `POST /api/v1/grouping/preview`.
-- Persona 3 puede crear un `CommandLineRunner` con `@Profile("demo")` o un script SQL; **no** incluir datos de demostración en `V1`.
+- Persona 3 puede crear un `CommandLineRunner` con `@Profile("demo")` o un script SQL; **no** incluir datos de demostración en `V1`/`V2`.
 - Mantener 15–20 descripciones variadas: sinónimos (“no hay luz”, “corte de energía”, “se fue la electricidad”), ruido (“el medidor hace ruido”), ubicaciones incompletas y tipos distintos.
 
 Mapeo rápido:
@@ -187,11 +203,12 @@ CORS se controla con `APP_CORS_ALLOWED_ORIGINS` (incluir el origen exacto del fr
 | --- | --- | --- |
 | Cliente: registrar | `POST /api/v1/reports` | Enviando, éxito con UUID, error de validación |
 | Cliente: seguimiento | `GET /api/v1/reports/{id}` | `SUGERIDA`, `CONFIRMADA`, `EN_ATENCION`, `RESUELTA`, `CERRADA`, `REABIERTA` |
+| Cliente: mis reportes | `GET /api/v1/reports/mine` | Paginado; requiere identidad y muestra estado por reporte |
 | Cliente: persistencia | `POST /api/v1/reports/{id}/persistence` | Confirmación y mensaje de reapertura |
 | Operador: bandeja | `GET /api/v1/operator/incidents` | Etiqueta **Baja certeza**, prioridad, contador de reportes |
 | Operador: detalle | `GET /api/v1/operator/incidents/{id}` | Reportes de origen, historial, alertas |
 | Operador: acciones | `confirm`, `separate`, `reassign`, `status` | Confirmación previa, error `409` = recargar |
-| Técnico | `GET /api/v1/technician/incidents/{id}` | Solo casos confirmados; ubicación, alcance, reportes |
+| Técnico | `GET /api/v1/technician/incidents` y `/{id}` | Bandeja por estado, filtro `onlyMine`, asignación y coordenadas |
 | Login/registro | Pendiente de Persona 3 (JWT) | — |
 
 ### 4.3 Reglas de presentación

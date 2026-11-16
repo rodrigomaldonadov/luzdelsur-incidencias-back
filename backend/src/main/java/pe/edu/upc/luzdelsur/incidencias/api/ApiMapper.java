@@ -62,6 +62,8 @@ public class ApiMapper {
                 incident.getLastReportedAt(),
                 incident.getConfirmedAt(),
                 incident.getConfirmedBy(),
+                incident.getAssignedTechnicianId(),
+                incident.getAssignedAt(),
                 incident.getClosedAt(),
                 incident.getUpdatedAt(),
                 incident.getVersion());
@@ -120,7 +122,9 @@ public class ApiMapper {
                         report.getDescription(),
                         report.getReportedAt(),
                         report.getLinkStatus(),
-                        report.getLinkCertainty()))
+                        report.getLinkCertainty(),
+                        report.getLatitude(),
+                        report.getLongitude()))
                 .toList();
 
         return new TechnicianDtos.TechnicianIncidentView(
@@ -135,9 +139,35 @@ public class ApiMapper {
                 incident.getReportCount(),
                 incident.getFirstReportedAt(),
                 incident.getLastReportedAt(),
+                incident.getConfirmedAt(),
+                incident.getConfirmedBy(),
+                incident.getStatusUpdatedAt(),
+                incident.getStatusUpdatedBy(),
+                incident.getAssignedTechnicianId(),
+                incident.getAssignedAt(),
+                incident.getClosedAt(),
+                incident.getUpdatedAt(),
                 estimatedScope(incident),
                 reportViews,
                 alerts(incident, reports));
+    }
+
+    public TechnicianDtos.TechnicianIncidentSummary technicianSummary(Incident incident) {
+        return new TechnicianDtos.TechnicianIncidentSummary(
+                incident.getId(),
+                incident.getSector(),
+                incident.getFailureType(),
+                incident.getStatus(),
+                incident.getCertainty(),
+                incident.isRequiresReview(),
+                incident.getPriorityLabel(),
+                incident.getPriorityScore(),
+                incident.getReportCount(),
+                incident.getFirstReportedAt(),
+                incident.getLastReportedAt(),
+                incident.getAssignedTechnicianId(),
+                incident.getAssignedAt(),
+                estimatedScope(incident));
     }
 
     public String clientMessageForCreate(GroupingProposal proposal) {

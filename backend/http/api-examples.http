@@ -163,3 +163,18 @@ X-Actor-Role: OPERADOR
 
 ### 18. Seguimiento del cliente
 GET {{baseUrl}}/api/v1/reports/{{reportId}}
+
+### 19. Mis reportes (requiere identidad)
+GET {{baseUrl}}/api/v1/reports/mine?page=0&size=20
+X-Actor-Id: {{clientId}}
+X-Actor-Role: CLIENTE
+
+### 20. Bandeja del tecnico
+GET {{baseUrl}}/api/v1/technician/incidents?page=0&size=20
+X-Actor-Id: {{technicianId}}
+X-Actor-Role: TECNICO
+
+### 21. Solo los casos asignados al tecnico
+GET {{baseUrl}}/api/v1/technician/incidents?onlyMine=true
+X-Actor-Id: {{technicianId}}
+X-Actor-Role: TECNICO

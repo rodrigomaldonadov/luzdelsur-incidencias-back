@@ -20,6 +20,10 @@ Mientras Persona 3 implementa JWT, la identidad se envía por cabeceras:
 - Endpoints de operador exigen `OPERADOR`; los de técnico, `TECNICO`. El alta y el seguimiento de reportes son públicos en el prototipo.
 - Con JWT, el frontend enviará `Authorization: Bearer <token>` y estas cabeceras dejarán de usarse.
 
+### Regla de propiedad de los reportes
+
+Al crear un reporte con identidad (`X-Actor-Id` hoy, `sub` del JWT después), el servidor guarda **ese identificador** como dueño y descarta cualquier `clientId` enviado en el cuerpo. Así se evita que un cliente liste reportes ajenos cambiando el payload. `GET /api/v1/reports/mine` exige identidad y devuelve únicamente los reportes de ese actor.
+
 ### Errores uniformes
 
 ```json
@@ -49,6 +53,7 @@ Mientras Persona 3 implementa JWT, la identidad se envía por cabeceras:
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/reports` | Público | Registra reporte, ejecuta el motor y devuelve UUID + mensaje |
 | `GET` | `/api/v1/reports/{reportId}` | Público | Estado comprensible del reporte |
+| `GET` | `/api/v1/reports/mine` | Identificado | Reportes propios paginados (requiere `X-Actor-Id`) |
 | `POST` | `/api/v1/reports/{reportId}/persistence` | Público | Caso C7: el cliente indica que la falla persiste |
 | `GET` | `/api/v1/operator/incidents` | `OPERADOR` | Bandeja priorizada y filtrable |
 | `GET` | `/api/v1/operator/incidents/{id}` | `OPERADOR` | Detalle + reportes + historial + alertas |
@@ -57,6 +62,7 @@ Mientras Persona 3 implementa JWT, la identidad se envía por cabeceras:
 | `POST` | `/api/v1/operator/reports/{reportId}/separate` | `OPERADOR` | Separa un reporte (opcionalmente crea caso nuevo) |
 | `POST` | `/api/v1/operator/reports/{reportId}/reassign` | `OPERADOR` | Reasigna a otra incidencia abierta |
 | `GET` | `/api/v1/operator/reports` | `OPERADOR` | Bandeja individual (alternativa A, pruebas H4) |
+| `GET` | `/api/v1/technician/incidents` | `TECNICO` | Bandeja de casos confirmados/en atención |
 | `GET` | `/api/v1/technician/incidents/{id}` | `TECNICO` | Contexto consolidado del caso confirmado |
 | `POST` | `/api/v1/technician/incidents/{id}/status` | `TECNICO` | `EN_ATENCION` o `RESUELTA` |
 | `POST` | `/api/v1/grouping/preview` | `OPERADOR` | Evalúa reglas sin persistir (QA / H3) |
@@ -89,6 +95,8 @@ Mientras Persona 3 implementa JWT, la identidad se envía por cabeceras:
 | `sector` | No | 0–120; si falta o es ambiguo se aplica C5 (`BAJA`) |
 | `reportedAt` | No | Por defecto `now`; no puede superar 5 minutos en el futuro |
 | `latitude` / `longitude` | No | Rangos geográficos válidos |
+
+> Si la petición incluye identidad (`X-Actor-Id` o JWT), el backend usa ese identificador como dueño del reporte y **ignora** `clientId` del cuerpo. Es la regla que protege `GET /api/v1/reports/mine`.
 
 **Respuesta `201 Created`**
 
@@ -140,6 +148,33 @@ Mientras Persona 3 implementa JWT, la identidad se envía por cabeceras:
 ```
 
 El seguimiento no expone notas del operador, identificadores de trabajadores ni datos de otros clientes.
+
+### Mis reportes
+
+`GET /api/v1/reports/mine?page=0&size=20`
+
+Requiere `X-Actor-Id` (o JWT). Devuelve `PageResponse<TrackingResponse>` ordenado por `reportedAt` descendente:
+
+```json
+{
+  "content": [
+    {
+      "report": { "id": "0dfb...", "incidentId": "0fc6...", "linkStatus": "SUGERIDO" },
+      "incidentStatus": "SUGERIDA",
+      "certainty": "ALTA",
+      "requiresReview": false,
+      "incidentUpdatedAt": "2026-11-16T10:00:00Z",
+      "clientMessage": "Tu reporte esta vinculado a una posible incidencia en tu sector..."
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Sin identidad responde `403 FORBIDDEN`. El servidor asocia el reporte al actor autenticado: no se puede consultar cambiando el `clientId` del cuerpo.
 
 ### C7 — la falla persiste
 
@@ -254,6 +289,45 @@ Sirve para comparar tiempos de revisión individual vs. agrupada (H4).
 
 ## 6. Técnico de campo
 
+### Bandeja del técnico
+
+`GET /api/v1/technician/incidents?status=EN_ATENCION&sector=Lince&onlyMine=true&page=0&size=20`
+
+- Solo devuelve casos `CONFIRMADA`, `EN_ATENCION` o `REABIERTA`; pedir `SUGERIDA` responde `400`.
+- `onlyMine=true` filtra por el técnico autenticado (`X-Actor-Id` hoy, JWT después) y exige identidad.
+- Orden: prioridad descendente y antigüedad ascendente.
+
+```json
+{
+  "content": [
+    {
+      "id": "0fc6...",
+      "sector": "Lince",
+      "failureType": "CORTE_TOTAL",
+      "status": "EN_ATENCION",
+      "certainty": "ALTA",
+      "requiresReview": false,
+      "priorityLabel": "MEDIA",
+      "priorityScore": 42.1,
+      "affectedReports": 2,
+      "firstReportedAt": "2026-11-16T15:47:58Z",
+      "lastReportedAt": "2026-11-16T15:49:58Z",
+      "assignedTechnicianId": "tec-lince",
+      "assignedAt": "2026-11-16T16:02:00Z",
+      "estimatedScope": "Sector Lince - 2 reporte(s) entre 16/11 10:47 y 16/11 10:49"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Al pasar el caso a `EN_ATENCION`, el backend registra `assignedTechnicianId` y `assignedAt` con el actor que inició la atención. No existe despacho automático de flotas ni asignación geográfica.
+
+### Detalle ampliado
+
 `GET /api/v1/technician/incidents/{id}`
 
 ```json
@@ -269,6 +343,14 @@ Sirve para comparar tiempos de revisión individual vs. agrupada (H4).
   "affectedReports": 2,
   "firstReportedAt": "2026-11-13T15:47:58Z",
   "lastReportedAt": "2026-11-13T15:49:58Z",
+  "confirmedAt": "2026-11-13T16:00:00Z",
+  "confirmedBy": "op-1",
+  "statusUpdatedAt": "2026-11-13T16:05:00Z",
+  "statusUpdatedBy": "tec-1",
+  "assignedTechnicianId": "tec-1",
+  "assignedAt": "2026-11-13T16:05:00Z",
+  "closedAt": null,
+  "updatedAt": "2026-11-13T16:05:00Z",
   "estimatedScope": "Sector San Isidro - 2 reporte(s) entre 13/11 10:47 y 13/11 10:49",
   "reports": [
     {
@@ -278,7 +360,9 @@ Sirve para comparar tiempos de revisión individual vs. agrupada (H4).
       "description": "No hay luz en toda la cuadra",
       "reportedAt": "2026-11-13T15:49:58Z",
       "linkStatus": "CONFIRMADO",
-      "certainty": "ALTA"
+      "certainty": "ALTA",
+      "latitude": -12.0850,
+      "longitude": -77.0350
     }
   ],
   "warnings": []

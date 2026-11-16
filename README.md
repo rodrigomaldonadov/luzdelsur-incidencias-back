@@ -11,11 +11,11 @@ Este repositorio contiene el entregable de **Persona 1: Backend + despliegue**.
 - **API REST en Spring Boot 3.5 / Java 21** con validación, transacciones, paginación y manejo uniforme de errores.
 - **Motor heurístico** por sector, ventana temporal y tipo de falla, con estado **Baja Certeza** y motivos explicables.
 - **Integración HTTP** con el microservicio de embeddings (timeout, *cooldown* y degradación sin bloquear el alta).
-- **Modelo PostgreSQL** con migración Flyway `V1` y relación 1:N incidencia–reporte.
+- **Modelo PostgreSQL** con migraciones Flyway `V1` (base) y `V2` (asignación del técnico), relación 1:N incidencia–reporte.
 - **Trazabilidad**: historial de vinculación, separación y reasignación; el UUID del reporte nunca cambia.
 - **Docker Compose** con PostgreSQL, backend, microservicio de embeddings y Nginx.
 - **HTTPS** con Let's Encrypt o certificado autofirmado, variables de entorno y *healthchecks*.
-- **19 pruebas automatizadas** (reglas C1–C5, flujo completo C1/C2/C6/C7 y contrato de embeddings).
+- **21 pruebas automatizadas** (reglas C1–C5, flujo completo C1/C2/C6/C7, contrato de embeddings y bandeja del técnico).
 
 ---
 
@@ -105,12 +105,14 @@ La API queda en `http://localhost:8080`. Si el microservicio de embeddings no es
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/reports` | Cliente | Registra reporte y ejecuta el motor |
 | `GET` | `/api/v1/reports/{id}` | Cliente | Estado comprensible |
+| `GET` | `/api/v1/reports/mine` | Cliente identificado | Reportes propios paginados |
 | `POST` | `/api/v1/reports/{id}/persistence` | Cliente | Reabre un caso resuelto (C7) |
 | `GET` | `/api/v1/operator/incidents` | Operador | Bandeja priorizada |
 | `POST` | `/api/v1/operator/incidents/{id}/confirm` | Operador | Confirma agrupación |
 | `POST` | `/api/v1/operator/reports/{id}/separate` | Operador | Separa reporte |
 | `POST` | `/api/v1/operator/reports/{id}/reassign` | Operador | Reasigna a otra incidencia |
-| `GET` | `/api/v1/technician/incidents/{id}` | Técnico | Contexto consolidado |
+| `GET` | `/api/v1/technician/incidents` | Técnico | Bandeja de casos confirmados/en atención |
+| `GET` | `/api/v1/technician/incidents/{id}` | Técnico | Contexto consolidado, asignación y coordenadas |
 | `POST` | `/api/v1/grouping/preview` | Operador | Evalúa reglas sin persistir |
 | `GET` | `/actuator/health` | Interno | Salud |
 
@@ -146,7 +148,9 @@ cd backend
 Cobertura funcional:
 
 - `GroupingEngineTest`: C1, C2, C3/C4, C5, degradación por embeddings.
-- `ReportFlowIntegrationTest`: flujo completo, separación/reasignación, C7, validaciones y autorización por rol.
+- `ReportFlowIntegrationTest`: flujo completo, separación/reasignación, C7, validaciones, autorización por rol, reportes propios y bandeja/asignación del técnico.
+- `HttpDescriptionSimilarityClientTest`: contrato HTTP y enfriamiento ante fallos.
+- `SchemaValidationTest`: Flyway `V1`+`V2` y mapeo JPA.
 
 ---
 
@@ -175,6 +179,6 @@ Justificación completa: [`docs/justificacion-backend.md`](docs/justificacion-ba
 
 ## Estado
 
-- Backend compilado y probado (`19/19` pruebas).
+- Backend compilado y probado (`21/21` pruebas).
 - Despliegue documentado y reproducible.
 - Seguridad productiva (JWT) pendiente por diseño del reparto de tareas.

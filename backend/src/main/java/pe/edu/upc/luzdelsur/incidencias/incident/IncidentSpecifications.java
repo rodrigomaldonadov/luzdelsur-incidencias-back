@@ -1,6 +1,7 @@
 package pe.edu.upc.luzdelsur.incidencias.incident;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Locale;
 
 import org.springframework.data.jpa.domain.Specification;
@@ -15,6 +16,18 @@ public final class IncidentSpecifications {
 
     public static Specification<Incident> hasStatus(IncidentStatus status) {
         return status == null ? null : (root, query, cb) -> cb.equal(root.get("status"), status);
+    }
+
+    public static Specification<Incident> hasStatusIn(Collection<IncidentStatus> statuses) {
+        return statuses == null || statuses.isEmpty()
+                ? null
+                : (root, query, cb) -> root.get("status").in(statuses);
+    }
+
+    public static Specification<Incident> assignedTo(String technicianId) {
+        return technicianId == null || technicianId.isBlank()
+                ? null
+                : (root, query, cb) -> cb.equal(root.get("assignedTechnicianId"), technicianId);
     }
 
     public static Specification<Incident> isOpen() {

@@ -22,7 +22,6 @@ public class HeaderActorProvider implements ActorProvider {
 
     private static final String ACTOR_ID_HEADER = "X-Actor-Id";
     private static final String ACTOR_ROLE_HEADER = "X-Actor-Role";
-    private static final String ANONYMOUS_ID = "anonimo";
 
     private final AppProperties properties;
 
@@ -34,14 +33,14 @@ public class HeaderActorProvider implements ActorProvider {
     public Actor current() {
         HttpServletRequest request = currentRequest();
         if (request == null) {
-            return new Actor(ANONYMOUS_ID, defaultRole());
+            return new Actor(Actor.ANONYMOUS_ID, defaultRole());
         }
 
         String id = trimToNull(request.getHeader(ACTOR_ID_HEADER));
         String roleHeader = trimToNull(request.getHeader(ACTOR_ROLE_HEADER));
 
         ActorRole role = roleHeader == null ? defaultRole() : parseRole(roleHeader);
-        return new Actor(id == null ? ANONYMOUS_ID : id, role);
+        return new Actor(id == null ? Actor.ANONYMOUS_ID : id, role);
     }
 
     private ActorRole defaultRole() {

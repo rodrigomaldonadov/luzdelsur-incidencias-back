@@ -5,6 +5,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,7 +14,9 @@ import pe.edu.upc.luzdelsur.incidencias.api.ApiMapper;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.ReportDtos;
 import pe.edu.upc.luzdelsur.incidencias.common.BadRequestException;
 import pe.edu.upc.luzdelsur.incidencias.common.ConflictException;
+import pe.edu.upc.luzdelsur.incidencias.common.ForbiddenException;
 import pe.edu.upc.luzdelsur.incidencias.common.NotFoundException;
+import pe.edu.upc.luzdelsur.incidencias.common.PageResponse;
 import pe.edu.upc.luzdelsur.incidencias.common.TextNormalizer;
 import pe.edu.upc.luzdelsur.incidencias.grouping.GroupingProposal;
 import pe.edu.upc.luzdelsur.incidencias.grouping.GroupingService;
@@ -82,7 +86,7 @@ public class ReportService {
 
         Report report = Report.register(
                 UUID.randomUUID(),
-                trimToNull(request.clientId()),
+                resolveClientId(request.clientId(), actor),
                 sector,
                 sectorKey,
                 trimToNull(request.reference()),
@@ -117,6 +121,29 @@ public class ReportService {
                 .orElseThrow(() -> new NotFoundException("Reporte no encontrado: " + reportId));
         Incident incident = report.getIncident();
         return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident));
+    }
+
+    /**
+     * Reportes propios del actor identificado.
+     *
+     * Regla de privacidad del prototipo: al crear un reporte con identidad
+     * (cabecera X-Actor-Id hoy, JWT despues), el servidor guarda ese
+     * identificador como dueno y descarta el clientId enviado en el cuerpo.
+     * Asi un cliente no puede listar reportes de otro cambiando el cuerpo.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<ReportDtos.TrackingResponse> myReports(Pageable pageable) {
+        Actor actor = accessControl.currentActor();
+        if (actor.isAnonymous()) {
+            throw new ForbiddenException(
+                    "Debe identificarse con X-Actor-Id (o JWT) para consultar sus reportes");
+        }
+
+        Page<Report> page = reports.findByClientId(actor.id(), pageable);
+        return PageResponse.from(page, report -> {
+            Incident incident = report.getIncident();
+            return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident));
+        });
     }
 
     private Incident resolveIncident(GroupingProposal proposal, String sector, String sectorKey,
@@ -158,6 +185,13 @@ public class ReportService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String resolveClientId(String requestedClientId, Actor actor) {
+        if (actor != null && !actor.isAnonymous()) {
+            return actor.id();
+        }
+        return trimToNull(requestedClientId);
     }
 
     private BigDecimal toDecimal(Double value) {

@@ -1,7 +1,7 @@
 # Evidencia de pruebas del backend
 
 **Responsable:** Persona 1 (backend y despliegue)
-**Última ejecución:** 13/11/2026
+**Última ejecución:** 16/11/2026
 **Comando:** `./mvnw test` (Windows: `mvnw.cmd test`)
 
 ---
@@ -9,16 +9,16 @@
 ## 1. Resultado global
 
 ```text
-Tests run: 19, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 21, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
 | Clase | Pruebas | Cobertura funcional |
 | --- | ---: | --- |
 | `GroupingEngineTest` | 7 | Reglas C1, C2, C3/C4, C5, similitud baja, embeddings caídos |
-| `ReportFlowIntegrationTest` | 7 | Flujo completo, C2, C3, C4, C5, validaciones, roles y salud |
+| `ReportFlowIntegrationTest` | 9 | Flujo completo, C2–C5, validaciones, roles, reportes propios y bandeja/asignación del técnico |
 | `HttpDescriptionSimilarityClientTest` | 4 | Contrato HTTP, campos snake_case, valores fuera de rango y enfriamiento |
-| `SchemaValidationTest` | 1 | Flyway + mapeo JPA con `ddl-auto=validate` |
+| `SchemaValidationTest` | 1 | Flyway `V1`+`V2` + mapeo JPA con `ddl-auto=validate` |
 
 ---
 
@@ -50,6 +50,20 @@ BUILD SUCCESS
 8. Cliente indica persistencia → `REABIERTA`.
 9. Separación con caso nuevo → reporte con UUID intacto.
 10. Reasignación al caso original → contador actualizado.
+
+`clientListsOnlyOwnReports` verifica:
+
+- el actor `cliente-uno` solo ve su reporte y no el de `cliente-demo`/`cliente-dos`;
+- sin identidad, `GET /api/v1/reports/mine` responde `403`.
+
+`technicianQueueAssignmentAndDetail` verifica:
+
+- la bandeja del técnico incluye el caso confirmado;
+- antes de iniciar atención, `onlyMine=true` devuelve 0;
+- al pasar a `EN_ATENCION` se registran `assignedTechnicianId` y `assignedAt`;
+- `onlyMine=true` filtra por técnico (`tec-lince` ve 1, `tec-otro` ve 0);
+- el detalle ampliado incluye marcas de estado, asignación y coordenadas;
+- `status=SUGERIDA` responde `400` (el técnico no ve propuestas sin confirmar).
 
 ---
 

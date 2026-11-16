@@ -25,10 +25,26 @@ Este documento define qué entrega Persona 1, qué debe completar cada rol y có
 | `GET /api/v1/technician/incidents` | Implementado | Casos `CONFIRMADA`, `EN_ATENCION` o `REABIERTA`; filtro `onlyMine` |
 | `GET /api/v1/technician/incidents/{id}` ampliado | Implementado | Asignación, marcas de estado y coordenadas de los reportes |
 | Migración `V2__technician_assignment.sql` | Implementada | `assigned_technician_id` y `assigned_at` |
-| `POST /api/v1/auth/login` | **No** | Fuera del alcance de Persona 1 (Persona 3) |
-| `POST /api/v1/auth/register` | **No** | Fuera del alcance de Persona 1 (Persona 3) |
-| `GET /api/v1/auth/me` | **No** | Fuera del alcance de Persona 1 (Persona 3) |
-| `POST /api/v1/auth/refresh` (opcional) | **No** | Fuera del alcance de Persona 1 (Persona 3) |
+
+### 1.2 Completado en la rama `develop` (autenticación, auditoría e integración)
+
+| Endpoint / cambio | Estado | Nota |
+| --- | --- | --- |
+| `POST /api/v1/auth/login` | Implementado | JWT HS256 + BCrypt; valida el rol si el formulario lo envía |
+| `POST /api/v1/auth/register` | Implementado | Solo `CLIENTE` salvo `APP_AUTH_ALLOW_STAFF_REGISTRATION=true` |
+| `GET /api/v1/auth/me` | Implementado | Relee la cuenta (rechaza cuentas desactivadas) |
+| `POST /api/v1/auth/refresh` | Implementado | Token de refresco de 7 días |
+| `JwtActorProvider` (`@Primary`) | Implementado | `sub` del token = `Actor.id`; cabeceras `X-Actor-*` solo con `APP_ALLOW_DEV_HEADERS=true` |
+| `V3__users_and_roles.sql` | Implementada | Tabla `app_user` |
+| `V4__audit_and_status_history.sql` | Implementada | `audit_event` e `incident_status_history` |
+| `V5__report_feedback.sql` | Implementada | Calificación del cliente e índice por `client_id` |
+| `GET /api/v1/technician/incidents/history` y `/{id}/timeline` | Implementados | Historial del técnico sin pasar por endpoints de operador |
+| `POST /api/v1/operator/incidents/{id}/assign` | Implementado | Asignación manual; un técnico no puede tomar el caso de otro (`409`) |
+| `GET/POST/PATCH /api/v1/operator/technicians` | Implementados | Gestión de técnicos |
+| `GET /api/v1/operator/metrics` | Implementado | Panel de monitoreo |
+| `GET /api/v1/operator/audit-events` | Implementado | Auditoría transversal |
+| `POST /api/v1/reports/{id}/feedback` | Implementado | Calificación de la atención |
+| Semilla de demo (`DemoDataSeeder`) | Implementada | 4 cuentas + dataset C1–C5 y casos en cada estado |
 
 ---
 
@@ -209,7 +225,9 @@ CORS se controla con `APP_CORS_ALLOWED_ORIGINS` (incluir el origen exacto del fr
 | Operador: detalle | `GET /api/v1/operator/incidents/{id}` | Reportes de origen, historial, alertas |
 | Operador: acciones | `confirm`, `separate`, `reassign`, `status` | Confirmación previa, error `409` = recargar |
 | Técnico | `GET /api/v1/technician/incidents` y `/{id}` | Bandeja por estado, filtro `onlyMine`, asignación y coordenadas |
-| Login/registro | Pendiente de Persona 3 (JWT) | — |
+| Login/registro | `POST /api/v1/auth/login`, `/register`, `/refresh`, `GET /me` | Error de credenciales (`401`), rol equivocado (`403`), sesión vencida |
+| Técnico: historial | `GET /api/v1/technician/incidents/history` y `/{id}/timeline` | Notas de resolución en `statusHistory` |
+| Cliente: calificación | `POST /api/v1/reports/{id}/feedback` | Visible si `canRate=true` |
 
 ### 4.3 Reglas de presentación
 
@@ -239,7 +257,7 @@ Los casos C1–C7 y el flujo completo ya se pueden reproducir con `curl` o Swagg
 - [ ] Caso C7 reabre sin perder historial.
 - [ ] Errores `400/403/404/409` muestran mensajes claros en la UI.
 - [ ] Respaldos y certificados verificados.
-- [ ] Usuario y contraseña de demo definidos (cuando exista JWT).
+- [ ] `APP_JWT_SECRET` y `APP_DEMO_PASSWORD` definidos en `.env`; `APP_ALLOW_DEV_HEADERS=false`.
 
 ---
 
@@ -247,9 +265,7 @@ Los casos C1–C7 y el flujo completo ya se pueden reproducir con `curl` o Swagg
 
 | Pendiente | Responsable | Impacto |
 | --- | --- | --- |
-| JWT, roles y login/registro | Persona 3 + Persona 4 | La API usa cabeceras temporales |
-| Auditoría transversal | Persona 3 | Solo existe historial de vínculos |
-| Dataset C1–C7 y 15–20 descripciones | Persona 3 | Pruebas manuales con datos propios |
+| Dataset C1–C7 ampliado a 15–20 descripciones | Persona 3 | La semilla cubre C1–C5 con 15 reportes; C6 y C7 se demuestran en vivo |
 | Microservicio real de embeddings | Persona 5 | Mock para demo |
 | Vistas completas y QA | Personas 2 y 4 | API lista |
 | Pruebas de carga | Fuera de alcance | Capacidad desconocida |

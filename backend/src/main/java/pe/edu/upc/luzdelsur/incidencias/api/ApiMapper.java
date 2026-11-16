@@ -5,6 +5,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -17,7 +18,9 @@ import pe.edu.upc.luzdelsur.incidencias.grouping.GroupingProposal;
 import pe.edu.upc.luzdelsur.incidencias.incident.Certainty;
 import pe.edu.upc.luzdelsur.incidencias.incident.Incident;
 import pe.edu.upc.luzdelsur.incidencias.incident.IncidentStatus;
+import pe.edu.upc.luzdelsur.incidencias.incident.IncidentStatusEvent;
 import pe.edu.upc.luzdelsur.incidencias.report.Report;
+import pe.edu.upc.luzdelsur.incidencias.report.ReportFeedback;
 import pe.edu.upc.luzdelsur.incidencias.report.ReportLinkHistory;
 
 /**
@@ -48,6 +51,11 @@ public class ApiMapper {
     }
 
     public OperatorDtos.IncidentSummary summary(Incident incident) {
+        return summary(incident, Map.of());
+    }
+
+    /** Resumen con nombres legibles del operador que confirmo y del tecnico asignado. */
+    public OperatorDtos.IncidentSummary summary(Incident incident, Map<String, String> actorNames) {
         return new OperatorDtos.IncidentSummary(
                 incident.getId(),
                 incident.getSector(),
@@ -66,19 +74,28 @@ public class ApiMapper {
                 incident.getAssignedAt(),
                 incident.getClosedAt(),
                 incident.getUpdatedAt(),
-                incident.getVersion());
+                incident.getVersion(),
+                nameOf(actorNames, incident.getConfirmedBy()),
+                nameOf(actorNames, incident.getAssignedTechnicianId()));
+    }
+
+    private String nameOf(Map<String, String> actorNames, String actorId) {
+        return actorId == null ? null : actorNames.get(actorId);
     }
 
     public OperatorDtos.IncidentDetail detail(Incident incident, List<Report> reports,
-                                              List<ReportLinkHistory> history) {
+                                              List<ReportLinkHistory> history,
+                                              List<IncidentStatusEvent> statusEvents,
+                                              Map<String, String> actorNames) {
         return new OperatorDtos.IncidentDetail(
-                summary(incident),
+                summary(incident, actorNames),
                 reports.stream().map(this::reportView).toList(),
-                history.stream().map(this::historyView).toList(),
-                alerts(incident, reports));
+                history.stream().map(entry -> historyView(entry, actorNames)).toList(),
+                alerts(incident, reports),
+                statusEvents.stream().map(event -> statusEventView(event, actorNames)).toList());
     }
 
-    public OperatorDtos.LinkHistoryView historyView(ReportLinkHistory history) {
+    public OperatorDtos.LinkHistoryView historyView(ReportLinkHistory history, Map<String, String> actorNames) {
         return new OperatorDtos.LinkHistoryView(
                 history.getId(),
                 history.getReportId(),
@@ -87,7 +104,21 @@ public class ApiMapper {
                 history.getAction(),
                 history.getActorId(),
                 history.getNote(),
-                history.getCreatedAt());
+                history.getCreatedAt(),
+                actorNames.get(history.getActorId()));
+    }
+
+    public OperatorDtos.StatusEventView statusEventView(IncidentStatusEvent event, Map<String, String> actorNames) {
+        return new OperatorDtos.StatusEventView(
+                event.getId(),
+                event.getEventType(),
+                event.getFromStatus(),
+                event.getToStatus(),
+                event.getActorId(),
+                actorNames.get(event.getActorId()),
+                event.getActorRole(),
+                event.getNote(),
+                event.getCreatedAt());
     }
 
     public ReportDtos.CreateResponse createResponse(Report report, Incident incident, GroupingProposal proposal) {
@@ -102,6 +133,11 @@ public class ApiMapper {
     }
 
     public ReportDtos.TrackingResponse tracking(Report report, Incident incident, String clientMessage) {
+        return tracking(report, incident, clientMessage, null);
+    }
+
+    public ReportDtos.TrackingResponse tracking(Report report, Incident incident, String clientMessage,
+                                                ReportFeedback feedback) {
         UUID incidentId = incident == null ? null : incident.getId();
         IncidentStatus status = incident == null ? null : incident.getStatus();
         Certainty certainty = incident == null ? null : incident.getCertainty();
@@ -109,7 +145,10 @@ public class ApiMapper {
         Instant updatedAt = incident == null ? null : incident.getUpdatedAt();
 
         return new ReportDtos.TrackingResponse(
-                reportView(report), incidentId, status, certainty, requiresReview, updatedAt, clientMessage);
+                reportView(report), incidentId, status, certainty, requiresReview, updatedAt, clientMessage,
+                feedback == null && (status == IncidentStatus.RESUELTA || status == IncidentStatus.CERRADA),
+                feedback == null ? null : new ReportDtos.FeedbackView(
+                        feedback.getRating(), feedback.getComment(), feedback.getCreatedAt()));
     }
 
     public TechnicianDtos.TechnicianIncidentView technicianView(Incident incident, List<Report> reports) {
@@ -167,7 +206,10 @@ public class ApiMapper {
                 incident.getLastReportedAt(),
                 incident.getAssignedTechnicianId(),
                 incident.getAssignedAt(),
-                estimatedScope(incident));
+                estimatedScope(incident),
+                incident.getStatusUpdatedAt(),
+                incident.getClosedAt(),
+                incident.getUpdatedAt());
     }
 
     public String clientMessageForCreate(GroupingProposal proposal) {

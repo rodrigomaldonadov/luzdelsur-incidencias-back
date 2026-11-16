@@ -11,11 +11,13 @@ Este repositorio contiene el entregable de **Persona 1: Backend + despliegue**.
 - **API REST en Spring Boot 3.5 / Java 21** con validación, transacciones, paginación y manejo uniforme de errores.
 - **Motor heurístico** por sector, ventana temporal y tipo de falla, con estado **Baja Certeza** y motivos explicables.
 - **Integración HTTP** con el microservicio de embeddings (timeout, *cooldown* y degradación sin bloquear el alta).
-- **Modelo PostgreSQL** con migraciones Flyway `V1` (base) y `V2` (asignación del técnico), relación 1:N incidencia–reporte.
+- **Modelo PostgreSQL** con migraciones Flyway `V1` (base), `V2` (asignación del técnico), `V3` (usuarios), `V4` (auditoría e historial de estados) y `V5` (calificación), relación 1:N incidencia–reporte.
+- **Autenticación JWT** (login, registro, refresco, `/me`) con contraseñas BCrypt y roles `CLIENTE`, `OPERADOR`, `TECNICO`.
+- **Auditoría** de accesos y acciones, historial de estados con notas, panel de métricas y gestión de técnicos.
 - **Trazabilidad**: historial de vinculación, separación y reasignación; el UUID del reporte nunca cambia.
 - **Docker Compose** con PostgreSQL, backend, microservicio de embeddings y Nginx.
 - **HTTPS** con Let's Encrypt o certificado autofirmado, variables de entorno y *healthchecks*.
-- **21 pruebas automatizadas** (reglas C1–C5, flujo completo C1/C2/C6/C7, contrato de embeddings y bandeja del técnico).
+- **25 pruebas automatizadas** (reglas C1–C5, flujo completo C1/C2/C6/C7, contrato de embeddings, bandeja del técnico, autenticación JWT y semilla de demo).
 
 ---
 
@@ -50,7 +52,7 @@ Requisitos: Docker Desktop / Docker Engine con Compose v2.
 ```bash
 cd deploy
 cp .env.example .env
-# Editar .env: POSTGRES_PASSWORD obligatoria
+# Editar .env: POSTGRES_PASSWORD, APP_JWT_SECRET y APP_DEMO_PASSWORD obligatorias
 chmod +x scripts/*.sh
 ./scripts/gen-selfsigned-cert.sh localhost
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
@@ -93,7 +95,10 @@ Variables mínimas:
 DB_URL=jdbc:postgresql://localhost:5432/incidencias
 DB_USER=incidencias
 DB_PASSWORD=incidencias
+APP_JWT_SECRET=una-clave-local-de-al-menos-32-caracteres
 ```
+
+Al arrancar se crean las cuentas de demo (`operador@`, `tecnico@`, `tecnico2@` y `cliente@luzdelsur.com.pe`, contraseña `12345678` en local) y, si la base está vacía, un dataset con casos en cada estado. Se desactiva con `APP_DEMO_SEED_USERS=false` / `APP_DEMO_SEED_REPORTS=false`.
 
 La API queda en `http://localhost:8080`. Si el microservicio de embeddings no está disponible, el motor sigue funcionando y degrada la certeza a `MEDIA`.
 
@@ -105,14 +110,23 @@ La API queda en `http://localhost:8080`. Si el microservicio de embeddings no es
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/reports` | Cliente | Registra reporte y ejecuta el motor |
 | `GET` | `/api/v1/reports/{id}` | Cliente | Estado comprensible |
-| `GET` | `/api/v1/reports/mine` | Cliente identificado | Reportes propios paginados |
+| `POST` | `/api/v1/auth/login` · `/register` · `/refresh` | Público | Sesión JWT |
+| `GET` | `/api/v1/auth/me` | Con sesión | Usuario actual |
+| `GET` | `/api/v1/reports/mine` | Cliente con sesión | Reportes propios paginados |
+| `POST` | `/api/v1/reports/{id}/feedback` | Dueño del reporte | Calificación de la atención |
 | `POST` | `/api/v1/reports/{id}/persistence` | Cliente | Reabre un caso resuelto (C7) |
 | `GET` | `/api/v1/operator/incidents` | Operador | Bandeja priorizada |
 | `POST` | `/api/v1/operator/incidents/{id}/confirm` | Operador | Confirma agrupación |
 | `POST` | `/api/v1/operator/reports/{id}/separate` | Operador | Separa reporte |
 | `POST` | `/api/v1/operator/reports/{id}/reassign` | Operador | Reasigna a otra incidencia |
+| `POST` | `/api/v1/operator/incidents/{id}/assign` | Operador | Asigna un técnico |
+| `GET` | `/api/v1/operator/metrics` | Operador | Panel de monitoreo |
+| `GET` `POST` `PATCH` | `/api/v1/operator/technicians` | Operador | Gestión de técnicos |
+| `GET` | `/api/v1/operator/audit-events` | Operador | Auditoría |
 | `GET` | `/api/v1/technician/incidents` | Técnico | Bandeja de casos confirmados/en atención |
 | `GET` | `/api/v1/technician/incidents/{id}` | Técnico | Contexto consolidado, asignación y coordenadas |
+| `GET` | `/api/v1/technician/incidents/history` | Técnico | Tareas cumplidas |
+| `GET` | `/api/v1/technician/incidents/{id}/timeline` | Técnico | Historial con notas de estado |
 | `POST` | `/api/v1/grouping/preview` | Operador | Evalúa reglas sin persistir |
 | `GET` | `/actuator/health` | Interno | Salud |
 
@@ -131,7 +145,12 @@ Contrato completo, ejemplos y errores: [`docs/api.md`](docs/api.md).
 | `EMBEDDINGS_TIMEOUT_MS` | `1500` | Timeout por llamada |
 | `EMBEDDINGS_MATCH_THRESHOLD` | `0.55` | Umbral de coincidencia |
 | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Orígenes del frontend |
-| `APP_DEV_DEFAULT_ROLE` | `OPERADOR` | Rol temporal sin JWT |
+| `APP_JWT_SECRET` | aleatorio por arranque | Secreto HS256 (mínimo 32 caracteres; obligatorio en Compose) |
+| `APP_JWT_ACCESS_TTL_MINUTES` | `60` | Vigencia del token de acceso |
+| `APP_AUTH_ALLOW_STAFF_REGISTRATION` | `false` | Permite autoregistro de operador/técnico |
+| `APP_DEMO_SEED_USERS` / `APP_DEMO_SEED_REPORTS` | `true` | Cuentas y dataset de demo |
+| `APP_DEMO_PASSWORD` | `12345678` (local) | Contraseña de las cuentas de demo |
+| `APP_ALLOW_DEV_HEADERS` | `false` | Acepta `X-Actor-*` sin token (solo pruebas locales) |
 | `SPRINGDOC_ENABLED` | `true` | Swagger (desactivar en producción) |
 
 Todas las variables del despliegue están en [`deploy/.env.example`](deploy/.env.example) y documentadas en [`docs/despliegue.md`](docs/despliegue.md).
@@ -149,8 +168,10 @@ Cobertura funcional:
 
 - `GroupingEngineTest`: C1, C2, C3/C4, C5, degradación por embeddings.
 - `ReportFlowIntegrationTest`: flujo completo, separación/reasignación, C7, validaciones, autorización por rol, reportes propios y bandeja/asignación del técnico.
+- `AuthFlowIntegrationTest`: registro, login, refresco, `/me`, cabeceras ignoradas en modo estricto y flujo completo con JWT (asignación, historial, calificación, métricas, auditoría).
+- `DemoDataSeederTest`: la semilla corre sobre Flyway y deja cuentas y casos en cada estado.
 - `HttpDescriptionSimilarityClientTest`: contrato HTTP y enfriamiento ante fallos.
-- `SchemaValidationTest`: Flyway `V1`+`V2` y mapeo JPA.
+- `SchemaValidationTest`: Flyway `V1`–`V5` y mapeo JPA.
 
 ---
 
@@ -171,14 +192,13 @@ Justificación completa: [`docs/justificacion-backend.md`](docs/justificacion-ba
 
 ## Traspasos pendientes
 
-- **Persona 3:** JWT, roles reales, auditoría y migraciones `V2+`; dataset C1–C7. Ver [`docs/integracion-equipo.md`](docs/integracion-equipo.md).
 - **Persona 5:** microservicio real de embeddings respetando el contrato. El mock actual es solo para demo.
-- **Personas 2 y 4:** frontend y QA; la API ya expone todos los flujos.
+- **Personas 2 y 4:** QA de las vistas conectadas; pantallas de métricas y gestión de técnicos (la API ya está). Ver [`docs/integracion-equipo.md`](docs/integracion-equipo.md).
 
 ---
 
 ## Estado
 
-- Backend compilado y probado (`21/21` pruebas).
+- Backend compilado y probado (`25/25` pruebas).
 - Despliegue documentado y reproducible.
-- Seguridad productiva (JWT) pendiente por diseño del reparto de tareas.
+- Autenticación JWT, auditoría y semilla de demo en la rama `develop`.

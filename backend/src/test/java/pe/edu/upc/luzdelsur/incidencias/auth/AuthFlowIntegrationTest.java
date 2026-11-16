@@ -163,7 +163,9 @@ class AuthFlowIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"technicianId\":\"" + tech.getId() + "\",\"note\":\"Cuadrilla cercana\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.incident.assignedTechnicianId").value(tech.getId().toString()));
+                .andExpect(jsonPath("$.incident.assignedTechnicianId").value(tech.getId().toString()))
+                .andExpect(jsonPath("$.incident.assignedTechnicianName").value("Tecnico Uno"))
+                .andExpect(jsonPath("$.incident.confirmedByName").value("Operador Uno"));
 
         mvc.perform(bearer(post("/api/v1/operator/incidents/{id}/assign", incidentId), operatorToken)
                         .contentType(MediaType.APPLICATION_JSON)

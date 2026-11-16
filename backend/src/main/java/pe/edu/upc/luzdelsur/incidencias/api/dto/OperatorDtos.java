@@ -38,7 +38,9 @@ public final class OperatorDtos {
             Instant assignedAt,
             Instant closedAt,
             Instant updatedAt,
-            long version) {
+            long version,
+            String confirmedByName,
+            String assignedTechnicianName) {
     }
 
     public record LinkHistoryView(

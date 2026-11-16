@@ -482,6 +482,8 @@ public class IncidentService {
         Set<String> actorIds = new HashSet<>();
         histories.forEach(entry -> addIfPresent(actorIds, entry.getActorId()));
         events.forEach(event -> addIfPresent(actorIds, event.getActorId()));
+        addIfPresent(actorIds, incident.getConfirmedBy());
+        addIfPresent(actorIds, incident.getAssignedTechnicianId());
         Map<String, String> names = directory.namesFor(actorIds);
 
         return mapper.detail(incident, linked, histories, events, names);

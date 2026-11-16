@@ -51,6 +51,11 @@ public class ApiMapper {
     }
 
     public OperatorDtos.IncidentSummary summary(Incident incident) {
+        return summary(incident, Map.of());
+    }
+
+    /** Resumen con nombres legibles del operador que confirmo y del tecnico asignado. */
+    public OperatorDtos.IncidentSummary summary(Incident incident, Map<String, String> actorNames) {
         return new OperatorDtos.IncidentSummary(
                 incident.getId(),
                 incident.getSector(),
@@ -69,7 +74,13 @@ public class ApiMapper {
                 incident.getAssignedAt(),
                 incident.getClosedAt(),
                 incident.getUpdatedAt(),
-                incident.getVersion());
+                incident.getVersion(),
+                nameOf(actorNames, incident.getConfirmedBy()),
+                nameOf(actorNames, incident.getAssignedTechnicianId()));
+    }
+
+    private String nameOf(Map<String, String> actorNames, String actorId) {
+        return actorId == null ? null : actorNames.get(actorId);
     }
 
     public OperatorDtos.IncidentDetail detail(Incident incident, List<Report> reports,
@@ -77,7 +88,7 @@ public class ApiMapper {
                                               List<IncidentStatusEvent> statusEvents,
                                               Map<String, String> actorNames) {
         return new OperatorDtos.IncidentDetail(
-                summary(incident),
+                summary(incident, actorNames),
                 reports.stream().map(this::reportView).toList(),
                 history.stream().map(entry -> historyView(entry, actorNames)).toList(),
                 alerts(incident, reports),

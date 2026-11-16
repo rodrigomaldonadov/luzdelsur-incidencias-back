@@ -19,6 +19,7 @@ Mientras Persona 3 implementa JWT, la identidad se envía por cabeceras:
 - Si no se envía rol, se usa `APP_DEV_DEFAULT_ROLE` (por defecto `OPERADOR` en local; en Compose se configura `CLIENTE`).
 - Endpoints de operador exigen `OPERADOR`; los de técnico, `TECNICO`. El alta y el seguimiento de reportes son públicos en el prototipo.
 - Con JWT, el frontend enviará `Authorization: Bearer <token>` y estas cabeceras dejarán de usarse.
+- La Swagger UI (`/docs`) muestra los campos `X-Actor-Id` y `X-Actor-Role` en cada operación para probar los flujos mientras no exista JWT.
 
 ### Regla de propiedad de los reportes
 

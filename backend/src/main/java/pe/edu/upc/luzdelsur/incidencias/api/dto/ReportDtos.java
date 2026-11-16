@@ -6,6 +6,8 @@ import java.util.UUID;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -67,7 +69,21 @@ public final class ReportDtos {
             Certainty certainty,
             boolean requiresReview,
             Instant incidentUpdatedAt,
-            String clientMessage) {
+            String clientMessage,
+            boolean canRate,
+            FeedbackView feedback) {
+    }
+
+    /** Calificacion de la atencion (1 a 5), solo con el caso RESUELTA o CERRADA. */
+    public record FeedbackRequest(
+            @NotNull @Min(1) @Max(5) Integer rating,
+            @Size(max = 500) String comment) {
+    }
+
+    public record FeedbackView(
+            int rating,
+            String comment,
+            Instant createdAt) {
     }
 
     public record PersistenceRequest(@Size(max = 500) String note) {

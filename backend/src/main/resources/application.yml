@@ -71,9 +71,25 @@ app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
   security:
-    # TEMPORAL: la autenticacion JWT y los roles los implementa Persona 3.
-    # Mientras tanto, el rol se lee de la cabecera X-Actor-Role.
+    # Identidad: Authorization: Bearer <JWT>. Las cabeceras X-Actor-* solo se
+    # aceptan si APP_ALLOW_DEV_HEADERS=true (pruebas locales / Swagger).
+    allow-dev-headers: ${APP_ALLOW_DEV_HEADERS:false}
     dev-default-role: ${APP_DEV_DEFAULT_ROLE:OPERADOR}
+    jwt:
+      # Minimo 32 caracteres. Si queda vacio se genera uno aleatorio en cada
+      # arranque (los tokens dejan de valer al reiniciar).
+      secret: ${APP_JWT_SECRET:}
+      issuer: ${APP_JWT_ISSUER:luzdelsur-incidencias}
+      access-ttl-minutes: ${APP_JWT_ACCESS_TTL_MINUTES:60}
+      refresh-ttl-days: ${APP_JWT_REFRESH_TTL_DAYS:7}
+  auth:
+    # false: el registro publico solo crea cuentas CLIENTE.
+    allow-staff-registration: ${APP_AUTH_ALLOW_STAFF_REGISTRATION:false}
+  demo:
+    # Cuentas de demostracion (operador, tecnicos y cliente) y dataset C1-C7.
+    seed-users: ${APP_DEMO_SEED_USERS:true}
+    seed-reports: ${APP_DEMO_SEED_REPORTS:true}
+    password: ${APP_DEMO_PASSWORD:12345678}
   grouping:
     window-minutes: ${GROUPING_WINDOW_MINUTES:30}
     max-candidates: ${GROUPING_MAX_CANDIDATES:5}

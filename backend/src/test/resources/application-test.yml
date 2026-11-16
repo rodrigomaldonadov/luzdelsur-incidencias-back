@@ -17,7 +17,13 @@ spring:
 
 app:
   security:
+    allow-dev-headers: true
     dev-default-role: CLIENTE
+    jwt:
+      secret: clave-de-pruebas-solo-para-tests-0123456789abcdef
+  demo:
+    seed-users: false
+    seed-reports: false
   grouping:
     window-minutes: 30
     max-candidates: 5

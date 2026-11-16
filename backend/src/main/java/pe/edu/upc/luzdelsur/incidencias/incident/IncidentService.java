@@ -2,7 +2,9 @@ package pe.edu.upc.luzdelsur.incidencias.incident;
 
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -16,11 +18,14 @@ import pe.edu.upc.luzdelsur.incidencias.api.ApiMapper;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.OperatorDtos;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.ReportDtos;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.TechnicianDtos;
+import pe.edu.upc.luzdelsur.incidencias.auth.AppUser;
+import pe.edu.upc.luzdelsur.incidencias.auth.UserDirectory;
 import pe.edu.upc.luzdelsur.incidencias.common.BadRequestException;
 import pe.edu.upc.luzdelsur.incidencias.common.ConflictException;
 import pe.edu.upc.luzdelsur.incidencias.common.ForbiddenException;
 import pe.edu.upc.luzdelsur.incidencias.common.NotFoundException;
 import pe.edu.upc.luzdelsur.incidencias.common.PageResponse;
+import pe.edu.upc.luzdelsur.incidencias.config.AppProperties;
 import pe.edu.upc.luzdelsur.incidencias.report.FailureType;
 import pe.edu.upc.luzdelsur.incidencias.report.LinkAction;
 import pe.edu.upc.luzdelsur.incidencias.report.Report;
@@ -47,25 +52,43 @@ public class IncidentService {
             IncidentStatus.EN_ATENCION,
             IncidentStatus.REABIERTA);
 
+    private static final Set<IncidentStatus> TECHNICIAN_HISTORY_STATUSES = EnumSet.of(
+            IncidentStatus.RESUELTA,
+            IncidentStatus.CERRADA);
+
+    private static final Set<IncidentStatus> ASSIGNABLE_STATUSES = EnumSet.of(
+            IncidentStatus.CONFIRMADA,
+            IncidentStatus.EN_ATENCION,
+            IncidentStatus.REABIERTA);
+
     private final IncidentRepository incidents;
     private final ReportRepository reports;
     private final ReportLinkHistoryRepository history;
     private final IncidentMetrics metrics;
     private final ApiMapper mapper;
     private final java.time.Clock clock;
+    private final IncidentStatusEventRepository statusEvents;
+    private final UserDirectory directory;
+    private final AppProperties properties;
 
     public IncidentService(IncidentRepository incidents,
                            ReportRepository reports,
                            ReportLinkHistoryRepository history,
                            IncidentMetrics metrics,
                            ApiMapper mapper,
-                           java.time.Clock clock) {
+                           java.time.Clock clock,
+                           IncidentStatusEventRepository statusEvents,
+                           UserDirectory directory,
+                           AppProperties properties) {
         this.incidents = incidents;
         this.reports = reports;
         this.history = history;
         this.metrics = metrics;
         this.mapper = mapper;
         this.clock = clock;
+        this.statusEvents = statusEvents;
+        this.directory = directory;
+        this.properties = properties;
     }
 
     @Transactional(readOnly = true)
@@ -105,6 +128,8 @@ public class IncidentService {
 
         Instant now = clock.instant();
         incident.markConfirmed(actor.id(), now);
+        statusEvents.save(IncidentStatusEvent.statusChange(incidentId, IncidentStatus.SUGERIDA,
+                IncidentStatus.CONFIRMADA, actor, truncate(note), now));
 
         List<Report> linked = reports.findByIncidentIdOrderByReportedAtAsc(incidentId);
         for (Report report : linked) {
@@ -130,8 +155,12 @@ public class IncidentService {
         if (!incident.getStatus().canTransitionTo(target)) {
             throw new ConflictException("Transicion no permitida: " + incident.getStatus() + " -> " + target);
         }
+        if (actor.role() == ActorRole.TECNICO) {
+            requireNotAssignedToAnother(incident, actor);
+        }
 
         Instant now = clock.instant();
+        IncidentStatus previous = incident.getStatus();
 
         if (target == IncidentStatus.DESCARTADA) {
             List<Report> linked = reports.findByIncidentIdOrderByReportedAtAsc(incidentId);
@@ -145,10 +174,51 @@ public class IncidentService {
         }
 
         incident.changeStatus(target, actor.id(), now);
-        if (target == IncidentStatus.EN_ATENCION && actor.role() == ActorRole.TECNICO) {
+        statusEvents.save(IncidentStatusEvent.statusChange(incidentId, previous, target, actor,
+                truncate(note), now));
+        if (target == IncidentStatus.EN_ATENCION && actor.role() == ActorRole.TECNICO
+                && !actor.id().equals(incident.getAssignedTechnicianId())) {
             incident.assignTechnician(actor.id(), now);
         }
         metrics.refresh(incident);
+        incidents.save(incident);
+        return buildDetail(incident);
+    }
+
+    /**
+     * Asignacion manual: el operador elige que tecnico atiende un caso ya
+     * confirmado. Si nadie lo asigna, el caso queda del tecnico que inicia la
+     * atencion (EN_ATENCION).
+     */
+    @Transactional
+    public OperatorDtos.IncidentDetail assignTechnician(UUID incidentId, String technicianId,
+                                                        String note, Actor actor) {
+        Incident incident = requireIncident(incidentId);
+        if (!ASSIGNABLE_STATUSES.contains(incident.getStatus())) {
+            throw new ConflictException("Solo se asignan casos CONFIRMADA, EN_ATENCION o REABIERTA. Estado actual: "
+                    + incident.getStatus());
+        }
+        String cleanId = technicianId.trim();
+        String technicianLabel = cleanId;
+        if (UserDirectory.isAccountId(cleanId)) {
+            AppUser technician = directory.find(cleanId)
+                    .orElseThrow(() -> new NotFoundException("Tecnico no encontrado: " + cleanId));
+            if (technician.getRole() != ActorRole.TECNICO) {
+                throw new BadRequestException("La cuenta indicada no tiene el rol TECNICO");
+            }
+            if (!technician.isActive()) {
+                throw new ConflictException("El tecnico esta desactivado");
+            }
+            technicianLabel = technician.getFullName();
+        } else if (!properties.getSecurity().isAllowDevHeaders()) {
+            throw new NotFoundException("Tecnico no encontrado: " + cleanId);
+        }
+
+        Instant now = clock.instant();
+        incident.assignTechnician(cleanId, now);
+        String detail = "Asignado a " + technicianLabel + (note == null || note.isBlank() ? "" : ". " + note);
+        statusEvents.save(IncidentStatusEvent.assignment(incidentId, incident.getStatus(), actor,
+                truncate(detail), now));
         incidents.save(incident);
         return buildDetail(incident);
     }
@@ -207,7 +277,10 @@ public class IncidentService {
         }
 
         if (source.getReportCount() == 0) {
+            IncidentStatus previous = source.getStatus();
             source.changeStatus(IncidentStatus.DESCARTADA, actor.id(), now);
+            statusEvents.save(IncidentStatusEvent.statusChange(sourceId, previous, IncidentStatus.DESCARTADA,
+                    actor, "Sin reportes vigentes tras la separacion", now));
             incidents.save(source);
         }
 
@@ -255,7 +328,10 @@ public class IncidentService {
         if (source != null) {
             metrics.refresh(source);
             if (source.getReportCount() == 0) {
+                IncidentStatus previous = source.getStatus();
                 source.changeStatus(IncidentStatus.DESCARTADA, actor.id(), now);
+                statusEvents.save(IncidentStatusEvent.statusChange(sourceId, previous,
+                        IncidentStatus.DESCARTADA, actor, "Sin reportes vigentes tras la reasignacion", now));
             }
             incidents.save(source);
         }
@@ -279,6 +355,9 @@ public class IncidentService {
 
         Instant now = clock.instant();
         if (incident.getStatus() == IncidentStatus.RESUELTA || incident.getStatus() == IncidentStatus.CERRADA) {
+            statusEvents.save(IncidentStatusEvent.statusChange(incident.getId(), incident.getStatus(),
+                    IncidentStatus.REABIERTA, actor,
+                    truncate("El cliente indica que la falla persiste. " + safe(note)), now));
             incident.changeStatus(IncidentStatus.REABIERTA, actor.id(), now);
             metrics.refresh(incident);
             incidents.save(incident);
@@ -293,14 +372,58 @@ public class IncidentService {
 
     @Transactional(readOnly = true)
     public TechnicianDtos.TechnicianIncidentView technicianView(UUID incidentId) {
+        Incident incident = requireTechnicianVisible(incidentId);
+        List<Report> linked = reports.findByIncidentIdOrderByReportedAtAsc(incidentId);
+        return mapper.technicianView(incident, linked);
+    }
+
+    /**
+     * Historial completo del caso para el tecnico (vinculos de reportes y
+     * eventos de estado con sus notas). Mismo formato que el detalle del operador.
+     */
+    @Transactional(readOnly = true)
+    public OperatorDtos.IncidentDetail technicianTimeline(UUID incidentId) {
+        return buildDetail(requireTechnicianVisible(incidentId));
+    }
+
+    /** Tareas cumplidas: casos RESUELTA o CERRADA, opcionalmente solo los del tecnico. */
+    @Transactional(readOnly = true)
+    public PageResponse<TechnicianDtos.TechnicianIncidentSummary> searchTechnicianHistory(
+            String sector, boolean onlyMine, String technicianId, Pageable pageable) {
+        requireIdentityIfOnlyMine(onlyMine, technicianId);
+        Specification<Incident> spec = (root, query, cb) -> cb.conjunction();
+        spec = and(spec, IncidentSpecifications.hasStatusIn(TECHNICIAN_HISTORY_STATUSES));
+        spec = and(spec, IncidentSpecifications.sectorContains(sector));
+        if (onlyMine) {
+            spec = spec.and(IncidentSpecifications.assignedTo(technicianId));
+        }
+        return PageResponse.from(incidents.findAll(spec, pageable), mapper::technicianSummary);
+    }
+
+    private Incident requireTechnicianVisible(UUID incidentId) {
         Incident incident = requireIncident(incidentId);
         if (incident.getStatus() == IncidentStatus.SUGERIDA
                 || incident.getStatus() == IncidentStatus.DESCARTADA) {
             throw new ConflictException("El caso aun no fue confirmado por el operador (estado "
                     + incident.getStatus() + ")");
         }
-        List<Report> linked = reports.findByIncidentIdOrderByReportedAtAsc(incidentId);
-        return mapper.technicianView(incident, linked);
+        return incident;
+    }
+
+    private void requireNotAssignedToAnother(Incident incident, Actor actor) {
+        String assigned = incident.getAssignedTechnicianId();
+        if (assigned != null && !assigned.equals(actor.id())) {
+            throw new ConflictException("El caso esta asignado a otro tecnico. "
+                    + "Solicite al operador la reasignacion");
+        }
+    }
+
+    private void requireIdentityIfOnlyMine(boolean onlyMine, String technicianId) {
+        if (onlyMine && (technicianId == null || technicianId.isBlank()
+                || Actor.ANONYMOUS_ID.equals(technicianId))) {
+            throw new ForbiddenException(
+                    "Para filtrar solo sus casos debe iniciar sesion como tecnico");
+        }
     }
 
     /**
@@ -316,11 +439,7 @@ public class IncidentService {
             throw new BadRequestException(
                     "El tecnico solo puede consultar casos en estado CONFIRMADA, EN_ATENCION o REABIERTA");
         }
-        if (onlyMine && (technicianId == null || technicianId.isBlank()
-                || Actor.ANONYMOUS_ID.equals(technicianId))) {
-            throw new ForbiddenException(
-                    "Para filtrar solo sus casos debe identificarse con X-Actor-Id (o JWT)");
-        }
+        requireIdentityIfOnlyMine(onlyMine, technicianId);
 
         Specification<Incident> spec = (root, query, cb) -> cb.conjunction();
         spec = status != null
@@ -358,7 +477,20 @@ public class IncidentService {
     private OperatorDtos.IncidentDetail buildDetail(Incident incident) {
         List<Report> linked = reports.findByIncidentIdOrderByReportedAtAsc(incident.getId());
         List<ReportLinkHistory> histories = history.findByIncidentId(incident.getId());
-        return mapper.detail(incident, linked, histories);
+        List<IncidentStatusEvent> events = statusEvents.findByIncidentIdOrderByCreatedAtAscIdAsc(incident.getId());
+
+        Set<String> actorIds = new HashSet<>();
+        histories.forEach(entry -> addIfPresent(actorIds, entry.getActorId()));
+        events.forEach(event -> addIfPresent(actorIds, event.getActorId()));
+        Map<String, String> names = directory.namesFor(actorIds);
+
+        return mapper.detail(incident, linked, histories, events, names);
+    }
+
+    private void addIfPresent(Set<String> target, String value) {
+        if (value != null) {
+            target.add(value);
+        }
     }
 
     private Incident requireIncident(UUID incidentId) {

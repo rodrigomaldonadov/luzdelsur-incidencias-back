@@ -20,10 +20,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import pe.edu.upc.luzdelsur.incidencias.api.dto.OperatorDtos;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.ReportDtos;
+import pe.edu.upc.luzdelsur.incidencias.audit.AuditAction;
+import pe.edu.upc.luzdelsur.incidencias.audit.AuditService;
 import pe.edu.upc.luzdelsur.incidencias.common.PageResponse;
 import pe.edu.upc.luzdelsur.incidencias.incident.Certainty;
 import pe.edu.upc.luzdelsur.incidencias.incident.IncidentService;
 import pe.edu.upc.luzdelsur.incidencias.incident.IncidentStatus;
+import pe.edu.upc.luzdelsur.incidencias.incident.MonitoringService;
 import pe.edu.upc.luzdelsur.incidencias.report.FailureType;
 import pe.edu.upc.luzdelsur.incidencias.report.ReportLinkStatus;
 import pe.edu.upc.luzdelsur.incidencias.security.AccessControl;
@@ -39,10 +42,15 @@ public class OperatorController {
 
     private final IncidentService incidentService;
     private final AccessControl accessControl;
+    private final MonitoringService monitoring;
+    private final AuditService audit;
 
-    public OperatorController(IncidentService incidentService, AccessControl accessControl) {
+    public OperatorController(IncidentService incidentService, AccessControl accessControl,
+                              MonitoringService monitoring, AuditService audit) {
         this.incidentService = incidentService;
         this.accessControl = accessControl;
+        this.monitoring = monitoring;
+        this.audit = audit;
     }
 
     @GetMapping("/incidents")
@@ -81,7 +89,10 @@ public class OperatorController {
                                                @Valid @RequestBody(required = false) OperatorDtos.ConfirmRequest request) {
         Actor actor = accessControl.require(ActorRole.OPERADOR);
         String note = request == null ? null : request.note();
-        return incidentService.confirm(incidentId, note, actor);
+        OperatorDtos.IncidentDetail detail = incidentService.confirm(incidentId, note, actor);
+        audit.record(actor, AuditAction.AGRUPACION_CONFIRMADA, "INCIDENCIA", incidentId,
+                "reportes=" + detail.incident().reportCount());
+        return detail;
     }
 
     @PostMapping("/incidents/{incidentId}/status")
@@ -89,7 +100,29 @@ public class OperatorController {
     public OperatorDtos.IncidentDetail changeStatus(@PathVariable UUID incidentId,
                                                     @Valid @RequestBody OperatorDtos.StatusRequest request) {
         Actor actor = accessControl.require(ActorRole.OPERADOR);
-        return incidentService.changeStatus(incidentId, request.status(), request.note(), actor);
+        OperatorDtos.IncidentDetail detail = incidentService.changeStatus(
+                incidentId, request.status(), request.note(), actor);
+        audit.record(actor, AuditAction.ESTADO_CAMBIADO, "INCIDENCIA", incidentId, "estado=" + request.status());
+        return detail;
+    }
+
+    @PostMapping("/incidents/{incidentId}/assign")
+    @Operation(summary = "Asigna el caso confirmado a un tecnico (gestion de cuadrillas)")
+    public OperatorDtos.IncidentDetail assign(@PathVariable UUID incidentId,
+                                              @Valid @RequestBody OperatorDtos.AssignRequest request) {
+        Actor actor = accessControl.require(ActorRole.OPERADOR);
+        OperatorDtos.IncidentDetail detail = incidentService.assignTechnician(
+                incidentId, request.technicianId(), request.note(), actor);
+        audit.record(actor, AuditAction.TECNICO_ASIGNADO, "INCIDENCIA", incidentId,
+                "tecnico=" + request.technicianId());
+        return detail;
+    }
+
+    @GetMapping("/metrics")
+    @Operation(summary = "Indicadores del panel de monitoreo: estados, prioridades, sectores y tiempos")
+    public OperatorDtos.MetricsView metrics() {
+        accessControl.require(ActorRole.OPERADOR);
+        return monitoring.metrics();
     }
 
     @PostMapping("/reports/{reportId}/separate")
@@ -99,7 +132,10 @@ public class OperatorController {
         Actor actor = accessControl.require(ActorRole.OPERADOR);
         Boolean createNew = request == null ? Boolean.TRUE : request.createNewIncident();
         String note = request == null ? null : request.note();
-        return incidentService.separate(reportId, createNew, note, actor);
+        OperatorDtos.SeparationResult result = incidentService.separate(reportId, createNew, note, actor);
+        audit.record(actor, AuditAction.REPORTE_SEPARADO, "REPORTE", reportId,
+                "nuevaIncidencia=" + result.newIncidentId());
+        return result;
     }
 
     @PostMapping("/reports/{reportId}/reassign")
@@ -107,7 +143,11 @@ public class OperatorController {
     public OperatorDtos.IncidentDetail reassign(@PathVariable UUID reportId,
                                                 @Valid @RequestBody OperatorDtos.ReassignRequest request) {
         Actor actor = accessControl.require(ActorRole.OPERADOR);
-        return incidentService.reassign(reportId, request.targetIncidentId(), request.note(), actor);
+        OperatorDtos.IncidentDetail detail = incidentService.reassign(
+                reportId, request.targetIncidentId(), request.note(), actor);
+        audit.record(actor, AuditAction.REPORTE_REASIGNADO, "REPORTE", reportId,
+                "destino=" + request.targetIncidentId());
+        return detail;
     }
 
     @GetMapping("/reports")

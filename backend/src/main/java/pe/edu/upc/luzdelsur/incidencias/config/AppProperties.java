@@ -20,6 +20,8 @@ public class AppProperties {
     private final Security security = new Security();
     private final Grouping grouping = new Grouping();
     private final Embeddings embeddings = new Embeddings();
+    private final Auth auth = new Auth();
+    private final Demo demo = new Demo();
 
     public String getPublicUrl() {
         return publicUrl;
@@ -45,6 +47,14 @@ public class AppProperties {
         return embeddings;
     }
 
+    public Auth getAuth() {
+        return auth;
+    }
+
+    public Demo getDemo() {
+        return demo;
+    }
+
     public static class Cors {
 
         private List<String> allowedOrigins = new ArrayList<>(List.of("http://localhost:5173"));
@@ -60,7 +70,19 @@ public class AppProperties {
 
     public static class Security {
 
+        /**
+         * Rol que reciben las peticiones sin identidad cuando las cabeceras de
+         * desarrollo estan habilitadas. Con JWT estricto, el anonimo es CLIENTE.
+         */
         private String devDefaultRole = "OPERADOR";
+
+        /**
+         * Acepta X-Actor-Id / X-Actor-Role sin token. Solo para pruebas locales
+         * y Swagger: en despliegue debe quedar en false.
+         */
+        private boolean allowDevHeaders = false;
+
+        private final Jwt jwt = new Jwt();
 
         public String getDevDefaultRole() {
             return devDefaultRole;
@@ -68,6 +90,109 @@ public class AppProperties {
 
         public void setDevDefaultRole(String devDefaultRole) {
             this.devDefaultRole = devDefaultRole;
+        }
+
+        public boolean isAllowDevHeaders() {
+            return allowDevHeaders;
+        }
+
+        public void setAllowDevHeaders(boolean allowDevHeaders) {
+            this.allowDevHeaders = allowDevHeaders;
+        }
+
+        public Jwt getJwt() {
+            return jwt;
+        }
+    }
+
+    public static class Jwt {
+
+        /** Secreto HS256; minimo 32 bytes. Vacio = secreto aleatorio por arranque. */
+        private String secret = "";
+        private String issuer = "luzdelsur-incidencias";
+        private long accessTtlMinutes = 60;
+        private long refreshTtlDays = 7;
+
+        public String getSecret() {
+            return secret;
+        }
+
+        public void setSecret(String secret) {
+            this.secret = secret;
+        }
+
+        public String getIssuer() {
+            return issuer;
+        }
+
+        public void setIssuer(String issuer) {
+            this.issuer = issuer;
+        }
+
+        public long getAccessTtlMinutes() {
+            return accessTtlMinutes;
+        }
+
+        public void setAccessTtlMinutes(long accessTtlMinutes) {
+            this.accessTtlMinutes = accessTtlMinutes;
+        }
+
+        public long getRefreshTtlDays() {
+            return refreshTtlDays;
+        }
+
+        public void setRefreshTtlDays(long refreshTtlDays) {
+            this.refreshTtlDays = refreshTtlDays;
+        }
+    }
+
+    public static class Auth {
+
+        /**
+         * Si es false, el registro publico solo crea cuentas CLIENTE. Las cuentas
+         * de operador y tecnico se crean con la semilla de demo o por un operador.
+         */
+        private boolean allowStaffRegistration = false;
+
+        public boolean isAllowStaffRegistration() {
+            return allowStaffRegistration;
+        }
+
+        public void setAllowStaffRegistration(boolean allowStaffRegistration) {
+            this.allowStaffRegistration = allowStaffRegistration;
+        }
+    }
+
+    public static class Demo {
+
+        /** Crea las cuentas de demostracion si no existen. */
+        private boolean seedUsers = false;
+        /** Carga el dataset C1-C7 si la tabla de reportes esta vacia. */
+        private boolean seedReports = false;
+        private String password = "";
+
+        public boolean isSeedUsers() {
+            return seedUsers;
+        }
+
+        public void setSeedUsers(boolean seedUsers) {
+            this.seedUsers = seedUsers;
+        }
+
+        public boolean isSeedReports() {
+            return seedReports;
+        }
+
+        public void setSeedReports(boolean seedReports) {
+            this.seedReports = seedReports;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
         }
     }
 

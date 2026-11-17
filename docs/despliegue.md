@@ -4,6 +4,33 @@ Esta guía cubre la puesta en marcha del stack completo: **PostgreSQL + backend 
 
 ---
 
+## 0. Resumen ejecutable
+
+Lo mínimo para dejar la API funcionando. El detalle de cada paso está en las secciones siguientes.
+
+| # | Paso | Comando o acción | Cómo saber que salió bien |
+| --- | --- | --- | --- |
+| 1 | Docker y Compose v2 instalados | §2 | `docker compose version` responde |
+| 2 | Clonar este repositorio y entrar a `deploy/` | `git clone … && cd luzdelsur-incidencias-back/deploy` | Existe `deploy/.env.example` |
+| 3 | Crear `.env` | `cp .env.example .env && chmod 600 .env` | El archivo existe y **no** se versiona |
+| 4 | Completar las 3 variables obligatorias | `POSTGRES_PASSWORD`, `APP_JWT_SECRET` (mín. 32 caracteres) y `APP_DEMO_PASSWORD` | Sin ellas `docker compose` aborta con `…_requerido` |
+| 5 | Ajustar dominio y CORS | `DOMAIN`, `APP_PUBLIC_URL`, `APP_CORS_ALLOWED_ORIGINS` (URL exacta del frontend) | — |
+| 6 | Certificado TLS | `./scripts/gen-selfsigned-cert.sh "$DOMAIN"` (luego Let's Encrypt, §5) | Existen `certs/fullchain.pem` y `certs/privkey.pem` |
+| 7 | Levantar | Sin el repo de embeddings real: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`. Con él en `../embeddings`: `./scripts/deploy.sh` | `docker compose ps` muestra `lds-backend` en `healthy` |
+| 8 | Verificar | §6 «Verificación» (salud + login) | `/health` responde `UP` y el login devuelve `token` |
+| 9 | Conectar el frontend | Compilar el front con `VITE_API_URL=https://<DOMINIO>/api` | El login del front entra con las cuentas demo |
+
+Datos que conviene tener presentes:
+
+- **Puerto y rutas.** El backend escucha en `8080` solo dentro de la red de Docker; afuera se expone únicamente Nginx en `80/443`. La API vive bajo `/api/v1/...` y la salud pública en `/health`.
+- **Base de datos.** Flyway crea y migra el esquema al arrancar (`V1` a `V5`). No hay que ejecutar SQL a mano. Nunca editar una migración ya aplicada.
+- **Datos de demostración.** En el primer arranque se crean las cuentas `operador@`, `tecnico@`, `tecnico2@` y `cliente@luzdelsur.com.pe`, todas con la clave `APP_DEMO_PASSWORD`, y un dataset de 15 reportes (casos C1-C5 más casos confirmados, en atención y resueltos). Los reportes solo se siembran si la tabla está vacía; las cuentas solo si no existen. Para no sembrar nada: `APP_DEMO_SEED_USERS=false` y `APP_DEMO_SEED_REPORTS=false`.
+- **Autenticación.** JWT HS256. `POST /api/v1/auth/login` devuelve `token` (acceso, 60 min) y `refreshToken` (7 días). Las demás rutas esperan `Authorization: Bearer <token>`. El registro público crea solo cuentas `CLIENTE`.
+- **Cambiar `APP_JWT_SECRET`** invalida todas las sesiones abiertas (los usuarios vuelven a iniciar sesión). No afecta los datos.
+- **`APP_ALLOW_DEV_HEADERS` debe quedar en `false`.** En `true` cualquiera puede hacerse pasar por operador con cabeceras `X-Actor-*`; existe solo para pruebas automatizadas.
+
+---
+
 ## 1. Requisitos
 
 | Requisito | Mínimo | Recomendado |
@@ -93,7 +120,15 @@ nano .env
 | `EMBEDDINGS_COOLDOWN_SECONDS` | `30` | No | Espera tras un fallo |
 | `EMBEDDINGS_MATCH_THRESHOLD` | `0.55` | No | Similitud que confirma certeza alta |
 | `EMBEDDINGS_CONFLICT_THRESHOLD` | `0.30` | No | Similitud que degrada a baja certeza |
-| `APP_DEV_DEFAULT_ROLE` | `CLIENTE` | No | Rol temporal sin cabecera (hasta JWT) |
+| `APP_JWT_SECRET` | salida de `openssl rand -base64 48` | **Sí** | Firma de los tokens; mínimo 32 caracteres o el backend no arranca |
+| `APP_JWT_ACCESS_TTL_MINUTES` | `60` | No | Vigencia del token de acceso |
+| `APP_JWT_REFRESH_TTL_DAYS` | `7` | No | Vigencia del token de refresco |
+| `APP_AUTH_ALLOW_STAFF_REGISTRATION` | `false` | No | En `false` el registro público solo crea clientes |
+| `APP_ALLOW_DEV_HEADERS` | `false` | No | Cabeceras `X-Actor-*` sin token; **mantener en `false`** |
+| `APP_DEMO_SEED_USERS` | `true` | No | Crea las cuentas demo si no existen |
+| `APP_DEMO_SEED_REPORTS` | `true` | No | Siembra el dataset demo si no hay reportes |
+| `APP_DEMO_PASSWORD` | cadena aleatoria | **Sí** | Clave de las cuentas demo |
+| `APP_DEV_DEFAULT_ROLE` | `CLIENTE` | No | Rol asumido sin token; solo aplica con `APP_ALLOW_DEV_HEADERS=true` |
 | `SPRINGDOC_ENABLED` | `false` | No | Swagger en producción |
 | `APP_LOG_LEVEL` | `INFO` | No | Nivel de logs del paquete propio |
 | `JAVA_OPTS` | `-XX:MaxRAMPercentage=75` | No | Memoria de la JVM |
@@ -183,12 +218,30 @@ curl -fsS https://TU_DOMINIO/health
 # Swagger solo si SPRINGDOC_ENABLED=true
 curl -fsS https://TU_DOMINIO/docs >/dev/null && echo "docs OK"
 
-# Alta de prueba
-curl -X POST https://TU_DOMINIO/api/v1/reports \
+# Login con una cuenta demo (la clave es APP_DEMO_PASSWORD)
+TOKEN=$(curl -fsS -X POST https://TU_DOMINIO/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -H "X-Actor-Role: CLIENTE" \
-  -d '{"sector":"San Isidro","failureType":"CORTE_TOTAL","description":"No hay luz en la cuadra"}'
+  -d '{"username":"operador@luzdelsur.com.pe","password":"<APP_DEMO_PASSWORD>"}' \
+  | sed -E 's/.*"token":"([^"]+)".*/\1/')
+
+# Sesión válida: debe responder el usuario con rol OPERADOR
+curl -fsS https://TU_DOMINIO/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
+
+# Bandeja del operador: debe listar las incidencias sembradas
+curl -fsS "https://TU_DOMINIO/api/v1/operator/incidents?size=5" -H "Authorization: Bearer $TOKEN"
 ```
+
+Con certificado autofirmado agregar `-k` a cada `curl`.
+
+### Conexión del frontend
+
+El frontend (React + Vite) lee la URL de la API **en tiempo de compilación**:
+
+```bash
+VITE_API_URL=https://TU_DOMINIO/api npm run build
+```
+
+`VITE_API_URL` termina en `/api` (sin `/v1`). El origen desde donde se sirve el frontend debe figurar en `APP_CORS_ALLOWED_ORIGINS`; si se sirve desde el mismo dominio que la API, basta con ese dominio.
 
 ### Desarrollo del backend sin contenedor
 
@@ -295,6 +348,11 @@ Las migraciones Flyway son incrementales. **Nunca** editar una migración ya apl
 | Backend reinicia en bucle | Credenciales de base incorrectas | Revisar `.env` y `DB_URL`; probar `pg_isready` |
 | `429 Too Many Requests` | Rate limit de Nginx | Ajustar `limit_req_zone` o espaciar solicitudes |
 | Alta de reporte responde `500` al llamar embeddings | Microservicio caído con excepción no controlada | Ver logs; el cliente ya degrada, pero revisar la URL interna |
+| `docker compose` aborta con `APP_JWT_SECRET_requerido` (o `APP_DEMO_PASSWORD_requerido`) | Variable obligatoria vacía en `.env` | Completarla y volver a levantar |
+| Backend termina con `APP_JWT_SECRET debe tener al menos 32 caracteres` | Secreto corto | Generar uno con `openssl rand -base64 48` |
+| El build falla en `embeddings`: `path ../embeddings not found` | No está el repositorio del microservicio real | Usar el override `docker-compose.dev.yml` (mock) o ajustar `EMBEDDINGS_CONTEXT` |
+| Login responde `401` | Clave distinta a `APP_DEMO_PASSWORD` del **primer** arranque | Las cuentas demo no se recrean; usar la clave original o borrar las filas de `app_user` y reiniciar |
+| Todas las rutas responden `401` | Falta `Authorization: Bearer` o el token venció | Volver a hacer login; el front refresca solo |
 | `spring.jpa.hibernate.ddl-auto=validate` falla | Esquema desactualizado | Ejecutar Flyway (`docker compose up backend` aplica migraciones) |
 | CORS bloquea el frontend | Origen no listado | Actualizar `APP_CORS_ALLOWED_ORIGINS` y reiniciar backend |
 | Certificado vencido | Renovación no programada | Ejecutar `renew-certs.sh` y revisar el cron |
@@ -316,7 +374,9 @@ docker stats --no-stream
 - [ ] Contraseña de PostgreSQL larga y distinta a la de desarrollo.
 - [ ] TLS válido, HTTP redirigiendo a HTTPS.
 - [ ] `SPRINGDOC_ENABLED=false` en producción.
-- [ ] `APP_DEV_DEFAULT_ROLE` eliminado cuando Persona 3 implemente JWT.
+- [ ] `APP_JWT_SECRET` y `APP_DEMO_PASSWORD` propios del servidor, distintos a los de desarrollo.
+- [ ] `APP_ALLOW_DEV_HEADERS=false` (es el valor por defecto en Compose).
+- [ ] `APP_AUTH_ALLOW_STAFF_REGISTRATION=false`: los técnicos los da de alta un operador con `POST /api/v1/operator/technicians`; los operadores vienen de la semilla demo.
 - [ ] `/actuator` bloqueado en Nginx (solo `/health`).
 - [ ] Puertos de base y embeddings **no** publicados al host.
 - [ ] Firewall con solo 22/80/443.
@@ -333,5 +393,5 @@ Para la sección de arquitectura y la demo, capturar:
 1. `docker compose ps` con los cuatro servicios en `healthy`/`running`.
 2. `curl https://<dominio>/health` respondiendo `{"status":"UP"}`.
 3. Candado de HTTPS en el navegador (o salida de `openssl s_client`).
-4. Logs mostrando `Flyway` aplicando `V1` y el backend iniciando.
+4. Logs mostrando `Flyway` aplicando `V1` a `V5` y el backend iniciando.
 5. Alta de un reporte y bandeja del operador con la etiqueta de baja certeza (coordinarlo con Personas 2 y 4).

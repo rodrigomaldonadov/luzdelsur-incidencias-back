@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import pe.edu.upc.luzdelsur.incidencias.api.dto.OperatorDtos;
 import pe.edu.upc.luzdelsur.incidencias.api.dto.TechnicianDtos;
+import pe.edu.upc.luzdelsur.incidencias.audit.AuditAction;
+import pe.edu.upc.luzdelsur.incidencias.audit.AuditService;
 import pe.edu.upc.luzdelsur.incidencias.common.ForbiddenException;
 import pe.edu.upc.luzdelsur.incidencias.common.PageResponse;
 import pe.edu.upc.luzdelsur.incidencias.incident.IncidentService;
@@ -40,10 +42,13 @@ public class TechnicianController {
 
     private final IncidentService incidentService;
     private final AccessControl accessControl;
+    private final AuditService audit;
 
-    public TechnicianController(IncidentService incidentService, AccessControl accessControl) {
+    public TechnicianController(IncidentService incidentService, AccessControl accessControl,
+                                AuditService audit) {
         this.incidentService = incidentService;
         this.accessControl = accessControl;
+        this.audit = audit;
     }
 
     @GetMapping("/incidents")
@@ -65,6 +70,29 @@ public class TechnicianController {
                 status, sector, onlyMine, actor.id(), pageable);
     }
 
+    @GetMapping("/incidents/history")
+    @Operation(summary = "Tareas cumplidas: casos RESUELTA o CERRADA (onlyMine filtra por el tecnico)")
+    public PageResponse<TechnicianDtos.TechnicianIncidentSummary> history(
+            @RequestParam(required = false) String sector,
+            @RequestParam(defaultValue = "false") boolean onlyMine,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        Actor actor = accessControl.require(ActorRole.TECNICO);
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
+                Sort.by(Sort.Order.desc("statusUpdatedAt"), Sort.Order.desc("updatedAt")));
+        return incidentService.searchTechnicianHistory(sector, onlyMine, actor.id(), pageable);
+    }
+
+    @GetMapping("/incidents/{incidentId}/timeline")
+    @Operation(summary = "Historial del caso: vinculos de reportes y eventos de estado con sus notas")
+    public OperatorDtos.IncidentDetail timeline(@PathVariable UUID incidentId) {
+        accessControl.require(ActorRole.TECNICO);
+        return incidentService.technicianTimeline(incidentId);
+    }
+
     @GetMapping("/incidents/{incidentId}")
     @Operation(summary = "Ubicacion, alcance estimado y reportes vinculados del caso confirmado")
     public TechnicianDtos.TechnicianIncidentView view(@PathVariable UUID incidentId) {
@@ -80,6 +108,9 @@ public class TechnicianController {
         if (!ALLOWED_TARGETS.contains(request.status())) {
             throw new ForbiddenException("El tecnico solo puede cambiar el caso a EN_ATENCION o RESUELTA");
         }
-        return incidentService.changeStatus(incidentId, request.status(), request.note(), actor);
+        OperatorDtos.IncidentDetail detail = incidentService.changeStatus(
+                incidentId, request.status(), request.note(), actor);
+        audit.record(actor, AuditAction.ESTADO_CAMBIADO, "INCIDENCIA", incidentId, "estado=" + request.status());
+        return detail;
     }
 }

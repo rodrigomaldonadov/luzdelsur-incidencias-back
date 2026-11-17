@@ -34,7 +34,10 @@ public final class TechnicianDtos {
             Instant lastReportedAt,
             String assignedTechnicianId,
             Instant assignedAt,
-            String estimatedScope) {
+            String estimatedScope,
+            Instant statusUpdatedAt,
+            Instant closedAt,
+            Instant updatedAt) {
     }
 
     public record TechnicianReportView(

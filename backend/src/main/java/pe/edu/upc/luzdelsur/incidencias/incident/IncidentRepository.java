@@ -38,4 +38,7 @@ public interface IncidentRepository extends JpaRepository<Incident, UUID>, JpaSp
                                                @Param("statuses") Collection<IncidentStatus> statuses,
                                                @Param("since") Instant since,
                                                Pageable pageable);
+
+    long countByAssignedTechnicianIdAndStatusIn(String assignedTechnicianId,
+                                                Collection<IncidentStatus> statuses);
 }

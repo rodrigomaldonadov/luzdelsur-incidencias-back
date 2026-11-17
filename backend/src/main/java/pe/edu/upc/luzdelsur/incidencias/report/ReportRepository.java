@@ -22,6 +22,8 @@ public interface ReportRepository extends JpaRepository<Report, UUID>, JpaSpecif
 
     long countByIncidentId(UUID incidentId);
 
+    long countByReportedAtAfter(Instant since);
+
     @Query("""
             select r.description from Report r
             where r.incident.id = :incidentId and r.description is not null

@@ -3,6 +3,8 @@ package pe.edu.upc.luzdelsur.incidencias.report;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -24,6 +26,7 @@ import pe.edu.upc.luzdelsur.incidencias.incident.Certainty;
 import pe.edu.upc.luzdelsur.incidencias.incident.Incident;
 import pe.edu.upc.luzdelsur.incidencias.incident.IncidentMetrics;
 import pe.edu.upc.luzdelsur.incidencias.incident.IncidentRepository;
+import pe.edu.upc.luzdelsur.incidencias.incident.IncidentStatus;
 import pe.edu.upc.luzdelsur.incidencias.security.Actor;
 import pe.edu.upc.luzdelsur.incidencias.security.AccessControl;
 
@@ -45,6 +48,7 @@ public class ReportService {
     private final AccessControl accessControl;
     private final ApiMapper mapper;
     private final java.time.Clock clock;
+    private final ReportFeedbackRepository feedbacks;
 
     public ReportService(ReportRepository reports,
                          IncidentRepository incidents,
@@ -53,7 +57,8 @@ public class ReportService {
                          IncidentMetrics metrics,
                          AccessControl accessControl,
                          ApiMapper mapper,
-                         java.time.Clock clock) {
+                         java.time.Clock clock,
+                         ReportFeedbackRepository feedbacks) {
         this.reports = reports;
         this.incidents = incidents;
         this.history = history;
@@ -62,6 +67,7 @@ public class ReportService {
         this.accessControl = accessControl;
         this.mapper = mapper;
         this.clock = clock;
+        this.feedbacks = feedbacks;
     }
 
     @Transactional
@@ -120,7 +126,8 @@ public class ReportService {
         Report report = reports.findById(reportId)
                 .orElseThrow(() -> new NotFoundException("Reporte no encontrado: " + reportId));
         Incident incident = report.getIncident();
-        return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident));
+        return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident),
+                feedbacks.findByReportId(reportId).orElse(null));
     }
 
     /**
@@ -140,10 +147,42 @@ public class ReportService {
         }
 
         Page<Report> page = reports.findByClientId(actor.id(), pageable);
+        Map<UUID, ReportFeedback> byReport = new HashMap<>();
+        feedbacks.findByReportIdIn(page.getContent().stream().map(Report::getId).toList())
+                .forEach(feedback -> byReport.put(feedback.getReportId(), feedback));
         return PageResponse.from(page, report -> {
             Incident incident = report.getIncident();
-            return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident));
+            return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident),
+                    byReport.get(report.getId()));
         });
+    }
+
+    /**
+     * Calificacion de la atencion. Solo el dueno del reporte, una vez, y con el
+     * caso RESUELTA o CERRADA. Si la falla persiste corresponde C7, no esta via.
+     */
+    @Transactional
+    public ReportDtos.TrackingResponse rate(UUID reportId, int rating, String comment) {
+        Actor actor = accessControl.currentActor();
+        if (actor.isAnonymous()) {
+            throw new ForbiddenException("Debe iniciar sesion para calificar la atencion");
+        }
+        Report report = reports.findById(reportId)
+                .orElseThrow(() -> new NotFoundException("Reporte no encontrado: " + reportId));
+        if (report.getClientId() == null || !report.getClientId().equals(actor.id())) {
+            throw new ForbiddenException("Solo el cliente que registro el reporte puede calificar la atencion");
+        }
+        Incident incident = report.getIncident();
+        if (incident == null || (incident.getStatus() != IncidentStatus.RESUELTA
+                && incident.getStatus() != IncidentStatus.CERRADA)) {
+            throw new ConflictException("Solo se puede calificar cuando el caso esta resuelto o cerrado");
+        }
+        if (feedbacks.existsByReportId(reportId)) {
+            throw new ConflictException("Este reporte ya fue calificado");
+        }
+        ReportFeedback feedback = feedbacks.save(ReportFeedback.of(
+                reportId, rating, trimToNull(comment), actor.id(), clock.instant()));
+        return mapper.tracking(report, incident, mapper.clientMessageForStatus(incident), feedback);
     }
 
     private Incident resolveIncident(GroupingProposal proposal, String sector, String sectorKey,

@@ -1,0 +1,11 @@
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+*.log
+*.pdf
+
+backend/target
+docs
+deploy

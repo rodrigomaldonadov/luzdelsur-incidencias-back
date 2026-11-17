@@ -1,0 +1,61 @@
+name: luzdelsur-incidencias-external
+
+# Despliegue del backend contra un PostgreSQL externo (sin contenedor de BD).
+# Uso:
+#   cd deploy
+#   cp .env.external.example .env
+#   # completar DB_URL, DB_USER y DB_PASSWORD
+#   docker compose -f docker-compose.external-db.yml up -d --build
+#
+# Puerto publicado: ${BACKEND_PORT:-8080} -> 8080 del contenedor.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-luzdelsur/incidencias-backend:latest}
+    container_name: lds-backend
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: "8080"
+
+      DB_URL: ${DB_URL:?Defina DB_URL en deploy/.env}
+      DB_USER: ${DB_USER:?Defina DB_USER en deploy/.env}
+      DB_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD en deploy/.env}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_POOL_MIN_IDLE: ${DB_POOL_MIN_IDLE:-2}
+
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      APP_DEV_DEFAULT_ROLE: ${APP_DEV_DEFAULT_ROLE:-CLIENTE}
+
+      GROUPING_WINDOW_MINUTES: ${GROUPING_WINDOW_MINUTES:-30}
+      GROUPING_MAX_CANDIDATES: ${GROUPING_MAX_CANDIDATES:-5}
+
+      EMBEDDINGS_ENABLED: ${EMBEDDINGS_ENABLED:-false}
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://host.docker.internal:8000}
+      EMBEDDINGS_TIMEOUT_MS: ${EMBEDDINGS_TIMEOUT_MS:-1500}
+      EMBEDDINGS_COOLDOWN_SECONDS: ${EMBEDDINGS_COOLDOWN_SECONDS:-30}
+      EMBEDDINGS_MATCH_THRESHOLD: ${EMBEDDINGS_MATCH_THRESHOLD:-0.55}
+      EMBEDDINGS_CONFLICT_THRESHOLD: ${EMBEDDINGS_CONFLICT_THRESHOLD:-0.30}
+
+      SPRINGDOC_ENABLED: ${SPRINGDOC_ENABLED:-false}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-INFO}
+      JAVA_OPTS: "${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+UseContainerSupport}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health/readiness | grep -q UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

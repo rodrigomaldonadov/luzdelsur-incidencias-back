@@ -13,6 +13,9 @@ deploy/certbot/www/*
 !deploy/certbot/www/.gitkeep
 deploy/backups/
 deploy/.env
+deploy/.env.*
+!deploy/.env.example
+!deploy/.env.external.example
 
 # IDE
 .idea/

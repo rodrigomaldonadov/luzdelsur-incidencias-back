@@ -23,12 +23,11 @@ Este repositorio contiene el entregable de **Persona 1: Backend + despliegue**.
 
 ```text
 luzdelsur-incidencias/
-├── backend/                     API Spring Boot + pruebas + Dockerfile
-│   ├── src/main/java/...        controllers, services, dominio, motor, embeddings
-│   ├── src/main/resources/      application.yml + db/migration/V1__baseline.sql
-│   └── src/test/...             pruebas del motor y de integración
-├── deploy/                      Compose, Nginx, certificados, scripts, mock
+├── Dockerfile                   Imagen del backend (build desde la raíz)
+├── backend/                     API Spring Boot + pruebas + Dockerfile alternativo
+├── deploy/                      Compose, Nginx, scripts, mock
 │   ├── docker-compose.yml
+│   ├── docker-compose.external-db.yml   Solo backend + PostgreSQL externo
 │   ├── docker-compose.dev.yml   demo con mock de embeddings
 │   ├── nginx/                   TLS, rate limit, cabeceras de seguridad
 │   ├── scripts/                 deploy, backup, certificados
@@ -96,6 +95,27 @@ DB_PASSWORD=incidencias
 ```
 
 La API queda en `http://localhost:8080`. Si el microservicio de embeddings no está disponible, el motor sigue funcionando y degrada la certeza a `MEDIA`.
+
+---
+
+## Despliegue solo backend con PostgreSQL externo
+
+Para usar una base gestionada o un PostgreSQL ya existente, sin levantar el contenedor `db`:
+
+```bash
+cd deploy
+cp .env.external.example .env
+# Editar DB_URL, DB_USER, DB_PASSWORD y BACKEND_PORT
+docker compose -f docker-compose.external-db.yml up -d --build
+```
+
+- **Puerto publicado:** `8080` (`http://IP_DEL_SERVIDOR:8080`). Se cambia con `BACKEND_PORT`.
+- Swagger: `http://IP:8080/docs`, habilitando `SPRINGDOC_ENABLED=true`.
+- Flyway aplica `V1` y `V2` al arrancar el contenedor.
+- El Dockerfile del backend está en la raíz (`Dockerfile`); también existe `backend/Dockerfile`.
+- Si se usa el stack completo con Nginx, los puertos públicos son **80/443** y el backend queda interno en 8080.
+
+> No subas `deploy/.env` al repositorio: contiene las credenciales de la base.
 
 ---
 

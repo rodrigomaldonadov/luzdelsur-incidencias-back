@@ -206,6 +206,48 @@ Con `application.yml` por defecto, la API queda en `http://localhost:8080` y usa
 
 ---
 
+### 6.4 Solo backend con PostgreSQL externo
+
+Si la base de datos ya existe (por ejemplo, un PostgreSQL gestionado), usar el compose específico:
+
+```bash
+cd deploy
+cp .env.external.example .env
+chmod 600 .env
+# Editar DB_URL, DB_USER, DB_PASSWORD y BACKEND_PORT
+docker compose -f docker-compose.external-db.yml up -d --build
+docker compose -f docker-compose.external-db.yml ps
+```
+
+| Aspecto | Valor |
+| --- | --- |
+| Puerto público del backend | **8080** por defecto (`BACKEND_PORT`) |
+| Contenedor | `8080` interno |
+| Healthcheck | `GET /actuator/health/readiness` |
+| Migraciones | Flyway aplica `V1` y `V2` al iniciar |
+| Swagger | `http://IP:8080/docs` con `SPRINGDOC_ENABLED=true` |
+| HTTPS | No incluido en este compose; usar un proxy externo o el compose completo (80/443) |
+
+Variables mínimas de `.env`:
+
+```env
+BACKEND_PORT=8080
+DB_URL=jdbc:postgresql://HOST:5435/incidencias
+DB_USER=incidencias
+DB_PASSWORD=...
+SPRINGDOC_ENABLED=false
+```
+
+Abrir solo el puerto necesario en el firewall:
+
+```bash
+sudo ufw allow 8080/tcp
+```
+
+En producción se recomienda no exponer 8080 directamente: colocar Nginx/Caddy con TLS delante o usar `docker-compose.yml` (puertos 80/443, backend interno).
+
+---
+
 ## 7. Operación
 
 | Tarea | Comando |

@@ -15,10 +15,16 @@ public class CorsConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**")
-                .allowedOrigins(properties.getCors().getAllowedOrigins().toArray(String[]::new))
-                .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("Content-Type", "Authorization", "X-Actor-Id", "X-Actor-Role")
-                .maxAge(3600);
+        String[] origins = properties.getCors().getAllowedOrigins().toArray(String[]::new);
+
+        // /v1/** se mantiene como alias de compatibilidad con el frontend ya
+        // compilado; ApiPathAliasFilter lo reescribe a /api/v1/**.
+        for (String path : new String[] {"/api/**", "/v1/**"}) {
+            registry.addMapping(path)
+                    .allowedOrigins(origins)
+                    .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+                    .allowedHeaders("Content-Type", "Authorization", "X-Actor-Id", "X-Actor-Role")
+                    .maxAge(3600);
+        }
     }
 }

@@ -22,8 +22,10 @@ import pe.edu.upc.luzdelsur.incidencias.security.ActorRole;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -33,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest(properties = {
         "app.security.allow-dev-headers=false",
+        "app.cors.allowed-origins=https://front-luzdelsur.solidwebs.com",
         "spring.datasource.url=jdbc:h2:mem:auth;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
 })
 @AutoConfigureMockMvc
@@ -244,6 +247,36 @@ class AuthFlowIntegrationTest {
         return mvc.perform(post("/api/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));
+    }
+
+    @Test
+    @DisplayName("Compatibilidad: /v1/** funciona y devuelve cabeceras CORS")
+    void legacyV1PrefixIsAliased() throws Exception {
+        String origin = "https://front-luzdelsur.solidwebs.com";
+
+        mvc.perform(options("/v1/auth/register")
+                        .header("Origin", origin)
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", origin))
+                .andExpect(header().string("Access-Control-Allow-Headers", "content-type"));
+
+        mvc.perform(post("/v1/auth/register")
+                        .header("Origin", origin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Alias User\",\"username\":\"alias@correo.pe\","
+                                + "\"password\":\"clave-segura-1\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.user.role").value("CLIENTE"))
+                .andExpect(header().string("Access-Control-Allow-Origin", origin));
+
+        // La ruta oficial sigue funcionando igual.
+        mvc.perform(options("/api/v1/auth/register")
+                        .header("Origin", origin)
+                        .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", origin));
     }
 
     private String tokenOf(ResultActions actions) throws Exception {
